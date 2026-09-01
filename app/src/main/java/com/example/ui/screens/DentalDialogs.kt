@@ -2375,8 +2375,45 @@ fun ChequeTransferDialog(
     val personalTargets = viewModel.personalSubAccounts.collectAsStateWithLifecycle().value
         .filter { !it.isDeleted }
         .distinctBy { "${it.category.trim()}|${it.parentName.trim()}|${it.name.trim()}" }
+        // رفعِ قطعیِ کرشِ «Key was already used»: اگر سینک ابری ردیفی را دوبار
+        // کشیده باشد، syncId یکسان دو کلیدِ تکراری می‌سازد؛ dedupe نهایی بر اساس
+        // خودِ syncId انجام می‌شود (اولین ردیف برمی‌ماند).
+        .distinctBy { it.syncId }
+    val parties = viewModel.partyAccounts.collectAsStateWithLifecycle().value
+        .filter { !it.isDeleted }
+        .distinctBy { it.syncId }
+    val expensePayments = viewModel.allExpensePayments.collectAsStateWithLifecycle().value.filter { !it.isDeleted }
 
     fun t(fa: String, en: String) = if (isPersian) fa else en
+
+    // سطرهای طرف‌حساب‌ها از قبل ساخته می‌شوند (بدون متغیرِ تغییرپذیرِ درونِ
+    // ثبتِ آیتم‌ها) و کلیدها رشتهٔ یکتا با پیشوندِ متمایزِ هر بخش‌اند.
+    // sectionTitle != null یعنی «سطرِ عنوانِ بخش»؛ در غیر این صورت سطرِ خودِ طرف‌حساب است.
+    data class PartyRowUi(
+        val key: String,
+        val sectionTitle: String? = null,
+        val party: com.example.data.PartyAccount? = null,
+        val dueLabel: String = ""
+    )
+    val partyRows = buildList {
+        var lastSectionTitle = ""
+        parties.sortedWith(compareBy({ it.section }, { it.name })).forEach { party ->
+            val secTitle = PartySection.fromKey(party.section).title(isPersian)
+            if (secTitle != lastSectionTitle) {
+                lastSectionTitle = secTitle
+                add(PartyRowUi(key = "party-sec-${party.section}", sectionTitle = secTitle))
+            }
+            val ledger = partyLedgerOf(party, activeExpenses, expensePayments)
+            val dueLabel = when {
+                ledger.remaining > 0L -> "${t("مانده:", "Due:")} ${formatAmount(ledger.debtAmount)}"
+                ledger.isPartyDebtor -> "${t("بستانکار:", "Credit:")} ${formatAmount(ledger.partyDebtAmount)}"
+                else -> t("تسویه", "Settled")
+            }
+            add(PartyRowUi(key = "party-${party.syncId}", party = party, dueLabel = dueLabel))
+        }
+    }
+
+    var personName by remember { mutableStateOf("") }
 
     AlertDialog(
         onDismissRequest = onDismiss,
@@ -2420,7 +2457,6 @@ fun ChequeTransferDialog(
                 // انتقال به «حساب اشخاصِ» غیرمرتبط با هزینه‌های مطب: با نامِ آزاد،
                 // چک فقط در «حساب اشخاص» می‌نشیند و در هزینه‌های مطب ثبت نمی‌شود.
                 if (viewModel.canTransferCheque(cheque)) {
-                    var personName by remember { mutableStateOf("") }
                     Surface(
                         shape = RoundedCornerShape(8.dp),
                         color = MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.4f),
@@ -2460,8 +2496,35 @@ fun ChequeTransferDialog(
                 }
                 if (viewModel.canTransferCheque(cheque))
                 LazyColumn(modifier = Modifier.heightIn(max = 320.dp), verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                    item { Text(t("هزینه‌ها / طرف حساب‌ها (هزینه مطب)", "Expenses / payable parties"), fontWeight = FontWeight.Bold, fontSize = 12.sp) }
-                    items(activeExpenses, key = { "e${it.id}" }) { expense ->
+                    // طرف‌حساب‌های هزینه‌های مطب — مسیر اصلیِ انتقال:
+                    // چکِ منتقل‌شده یک سندِ پرداختیِ چکی در دفتر همان طرف‌حساب می‌شود (transferPartyPaymentId).
+                    if (partyRows.isNotEmpty()) {
+                        item(key = "hdr-party") { Text(t("طرف‌حساب‌های حسابداری (هزینه‌های مطب)", "Party accounts (clinic expenses)"), fontWeight = FontWeight.Bold, fontSize = 12.sp) }
+                        partyRows.forEach { row ->
+                            item(key = row.key) {
+                                if (row.sectionTitle != null) {
+                                    Text(
+                                        text = row.sectionTitle,
+                                        fontSize = 10.sp,
+                                        color = Color.Gray,
+                                        fontWeight = FontWeight.SemiBold,
+                                        modifier = Modifier.padding(top = 2.dp)
+                                    )
+                                } else {
+                                    val target = row.party ?: return@item
+                                    TextButton(onClick = { viewModel.transferChequeToParty(cheque, target); onDismiss() }, modifier = Modifier.fillMaxWidth()) {
+                                        Text("${target.displayLabel} — ${row.dueLabel} $currency", maxLines = 1)
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    item { Text(t("فاکتورهای بدون طرف‌حساب (هزینه‌های قدیمی)", "Legacy invoices without party"), fontWeight = FontWeight.Bold, fontSize = 12.sp) }
+                    val legacyExpenses = activeExpenses.filter { it.partyAccountId == null }
+                    if (legacyExpenses.isEmpty()) {
+                        item { Text(t("همهٔ فاکتورها به طرف‌حساب‌ها پیوند خورده‌اند", "All invoices are linked to parties"), fontSize = 10.sp, color = Color.Gray) }
+                    }
+                    items(legacyExpenses.distinctBy { it.id }, key = { "legacy-${it.id}" }) { expense ->
                         TextButton(onClick = { viewModel.transferChequeToExpense(cheque, expense.subAccountName, expense.category, expense.id); onDismiss() }, modifier = Modifier.fillMaxWidth()) {
                             Text("${expense.subAccountName.ifBlank { expense.category }} — ${formatAmount(expense.amount)} $currency", maxLines = 1)
                         }
@@ -2470,7 +2533,7 @@ fun ChequeTransferDialog(
                     if (personalTargets.isEmpty()) {
                         item { Text(t("حساب شخصی تعریف نشده است", "No personal accounts defined"), fontSize = 10.sp, color = Color.Gray) }
                     }
-                    items(personalTargets, key = { "p${it.syncId}" }) { target ->
+                    items(personalTargets, key = { "pers-${it.syncId}" }) { target ->
                         val label = if (target.parentName.isBlank()) target.name else "${target.parentName} - ${target.name}"
                         TextButton(
                             onClick = {

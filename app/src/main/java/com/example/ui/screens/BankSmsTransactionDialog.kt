@@ -45,7 +45,7 @@ data class BankSmsTxnInfo(
 /** یک سطر تخصیص در کادر پایین پاپ‌آپ (واریز بابت / برداشت بابت). */
 private data class AllocRowUi(
     val id: Int,
-    val kind: String = "", // PATIENT / MISC_INCOME / CLINIC_EXPENSE / PERSONAL_SUB / PERSON
+    val kind: String = "", // PATIENT / MISC_INCOME / CLINIC_EXPENSE / PARTY / PERSONAL_SUB / PERSON
     val targetId: Long? = null,
     val targetName: String = "",
     val amount: Long = 0L,
@@ -69,6 +69,7 @@ fun BankSmsTransactionDialog(
     val allPayments by viewModel.allPayments.collectAsStateWithLifecycle()
     val clinicExpenses by viewModel.clinicExpenses.collectAsStateWithLifecycle()
     val allExpensePayments by viewModel.allExpensePayments.collectAsStateWithLifecycle()
+    val partyAccounts by viewModel.partyAccounts.collectAsStateWithLifecycle()
     val personalSubAccounts by viewModel.personalSubAccounts.collectAsStateWithLifecycle()
     val childrenExpenses by viewModel.childrenExpenses.collectAsStateWithLifecycle()
     val settings by viewModel.settings.collectAsStateWithLifecycle()
@@ -133,6 +134,7 @@ fun BankSmsTransactionDialog(
     var activeCalcRowId by remember { mutableStateOf<Int?>(null) }
     var personalPickerRowId by remember { mutableStateOf<Int?>(null) }
     var incomePickerRowId by remember { mutableStateOf<Int?>(null) }
+    var partyPickerRowId by remember { mutableStateOf<Int?>(null) }
     // فیلتر بیماران در بخش واریز (درخواست ۶): DEBTORS = بیماران دارای بدهی، ALL = همه بیماران فعال
     var depositPatientScope by remember { mutableStateOf("DEBTORS") }
 
@@ -214,6 +216,24 @@ fun BankSmsTransactionDialog(
                 personalPickerRowId = null
             },
             onDismiss = { personalPickerRowId = null }
+        )
+    }
+
+    // پاپ‌آپ انتخاب طرف حساب (برداشتِ پیامکی به طرف‌حسابِ هزینه‌های مطب)
+    if (partyPickerRowId != null) {
+        PartyWithdrawTargetPickerDialog(
+            isPersian = isPersian,
+            parties = partyAccounts.filter { !it.isDeleted },
+            onSelect = { party ->
+                val rid = partyPickerRowId
+                if (rid != null) {
+                    rows = rows.map { r ->
+                        if (r.id == rid) r.copy(kind = "PARTY", targetId = party.id, targetName = party.displayLabel) else r
+                    }
+                }
+                partyPickerRowId = null
+            },
+            onDismiss = { partyPickerRowId = null }
         )
     }
 
@@ -493,6 +513,18 @@ fun BankSmsTransactionDialog(
                                                 }
                                             )
                                         }
+                                        // طرف‌حساب‌ها (طرف‌حساب‌های هزینه‌های مطب): پرداختِ کلیِ طرف‌حساب —
+                                        // بدون نیاز به فاکتورِ مشخص؛ در دفتر طرف‌حساب ثبت می‌شود (clinicExpenseId = 0).
+                                        if (partyAccounts.any { !it.isDeleted }) {
+                                            HorizontalDivider()
+                                            DropdownMenuItem(
+                                                text = { Text("📒 طرف‌حساب‌ها (پرداخت کلیِ طرف‌حساب)...", fontSize = 11.sp, fontWeight = FontWeight.Bold) },
+                                                onClick = {
+                                                    targetExpanded = false
+                                                    partyPickerRowId = row.id
+                                                }
+                                            )
+                                        }
                                         HorizontalDivider()
                                         // در حساب‌های شخصی: انتخاب در پاپ‌آپ جدید (با حفظ پاپ‌آپ فعلی)
                                         DropdownMenuItem(
@@ -569,7 +601,7 @@ fun BankSmsTransactionDialog(
 
                 // ================= دکمه‌های پایانی =================
                 val allRowsValid = rows.all { it.kind.isNotBlank() && it.amount > 0 } &&
-                    rows.filter { it.kind == "PATIENT" || it.kind == "CLINIC_EXPENSE" }.all { it.targetId != null } &&
+                    rows.filter { it.kind == "PATIENT" || it.kind == "CLINIC_EXPENSE" || it.kind == "PARTY" }.all { it.targetId != null } &&
                     // درآمد متفرقه باید دارای شرح/توضیح باشد (درخواست ۶)
                     rows.filter { it.kind == "MISC_INCOME" }.all { it.description.isNotBlank() }
                 val canRegister = selectedAccountId != null && rowsSum == total && allRowsValid
@@ -698,6 +730,93 @@ fun BankSmsTransactionDialog(
  *  - لیست هزینه‌های شخصی (سرفصل‌های حساب شخصی)
  *  - تیک برای لیست اشخاص در بخش فرزندان (حساب اشخاص، قابل گزارش‌گیری با نام شخص و ریز حساب)
  */
+@Composable
+/** انتخاب «طرف حساب» برای برداشتِ پیامکی به طرف‌حسابِ هزینه‌های مطب (ثبت در دفتر طرف‌حساب). */
+@Composable
+fun PartyWithdrawTargetPickerDialog(
+    isPersian: Boolean = true,
+    parties: List<PartyAccount>,
+    onSelect: (party: PartyAccount) -> Unit,
+    onDismiss: () -> Unit
+) {
+    val sorted = parties.sortedWith(compareBy({ it.section }, { it.name }))
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = {
+            Text(
+                text = if (isPersian) "انتخاب طرف حساب (طرف‌حساب هزینه‌های مطب)" else "Select party account",
+                fontWeight = FontWeight.Bold,
+                fontSize = 14.sp
+            )
+        },
+        text = {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .heightIn(max = 420.dp)
+                    .verticalScroll(rememberScrollState()),
+                verticalArrangement = Arrangement.spacedBy(4.dp)
+            ) {
+                if (sorted.isEmpty()) {
+                    Text(
+                        text = if (isPersian) "هنوز طرف حسابی در «هزینه‌های مطب» تعریف نشده است."
+                        else "No party accounts defined in Clinic Expenses yet.",
+                        fontSize = 11.sp,
+                        color = Color.Gray
+                    )
+                }
+                var lastSectionKey = ""
+                sorted.forEach { party ->
+                    if (party.section != lastSectionKey) {
+                        lastSectionKey = party.section
+                        Text(
+                            text = PartySection.fromKey(party.section).title(isPersian),
+                            fontSize = 10.sp,
+                            fontWeight = FontWeight.SemiBold,
+                            color = MaterialTheme.colorScheme.primary,
+                            modifier = Modifier.padding(top = 6.dp)
+                        )
+                    }
+                    Surface(
+                        modifier = Modifier.fillMaxWidth(),
+                        shape = RoundedCornerShape(8.dp),
+                        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f),
+                        onClick = { onSelect(party) }
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(horizontal = 10.dp, vertical = 8.dp),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text(
+                                text = party.displayLabel,
+                                fontSize = 12.sp,
+                                fontWeight = FontWeight.Bold,
+                                maxLines = 1
+                            )
+                            Text(
+                                text = party.code,
+                                fontSize = 9.5.sp,
+                                color = Color.Gray
+                            )
+                        }
+                    }
+                }
+                Text(
+                    text = if (isPersian) "با انتخاب، مبلغِ برداشت به‌عنوان «پرداخت به این طرف‌حساب» در دفتر طرف‌حساب ثبت می‌شود."
+                    else "On selection, the withdrawal is posted to the party's ledger as a payment.",
+                    fontSize = 10.sp,
+                    color = Color.Gray,
+                    modifier = Modifier.padding(top = 6.dp)
+                )
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = onDismiss) { Text(if (isPersian) "انصراف" else "Cancel") }
+        }
+    )
+}
+
 @Composable
 fun PersonalWithdrawTargetPickerDialog(
     isPersian: Boolean = true,

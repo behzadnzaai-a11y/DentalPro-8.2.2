@@ -250,6 +250,30 @@ interface ExpensePaymentDao {
 }
 
 @Dao
+interface PartyAccountDao {
+    @Query("SELECT * FROM party_accounts WHERE syncId = :syncId LIMIT 1")
+    suspend fun getBySyncId(syncId: String): PartyAccount?
+
+    @Query("SELECT * FROM party_accounts WHERE id = :id LIMIT 1")
+    suspend fun getById(id: Long): PartyAccount?
+
+    @Query("SELECT * FROM party_accounts ORDER BY section ASC, name ASC")
+    fun getAllPartyAccounts(): Flow<List<PartyAccount>>
+
+    @Query("SELECT * FROM party_accounts")
+    suspend fun getAllList(): List<PartyAccount>
+
+    @Query("SELECT * FROM party_accounts WHERE section = :section")
+    suspend fun getBySection(section: String): List<PartyAccount>
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun insertPartyAccount(account: PartyAccount): Long
+
+    @Delete
+    suspend fun deletePartyAccount(account: PartyAccount)
+}
+
+@Dao
 interface PersonalTransactionDao {
     @Query("SELECT * FROM personal_transactions WHERE syncId = :syncId LIMIT 1")
     suspend fun getBySyncId(syncId: String): PersonalTransaction?
@@ -786,6 +810,7 @@ interface UnregisteredBankSmsDao {
         EquipmentMaintenance::class,
         ClinicExpense::class,
         ExpensePayment::class,
+        PartyAccount::class,
         PersonalTransaction::class,
         TreatmentTemplate::class,
         BankAccount::class,
@@ -806,7 +831,7 @@ interface UnregisteredBankSmsDao {
         PendingSyncOp::class,
         UnregisteredBankSms::class
     ],
-    version = 14, // = AppDatabase.DB_VERSION (باید هم‌مقدار بماند)
+    version = 16, // = AppDatabase.DB_VERSION (باید هم‌مقدار بماند)
     exportSchema = true
 )
 abstract class AppDatabase : RoomDatabase() {
@@ -821,6 +846,7 @@ abstract class AppDatabase : RoomDatabase() {
     abstract fun equipmentMaintenanceDao(): EquipmentMaintenanceDao
     abstract fun clinicExpenseDao(): ClinicExpenseDao
     abstract fun expensePaymentDao(): ExpensePaymentDao
+    abstract fun partyAccountDao(): PartyAccountDao
     abstract fun personalTransactionDao(): PersonalTransactionDao
     abstract fun treatmentTemplateDao(): TreatmentTemplateDao
     abstract fun prescriptionDao(): PrescriptionDao
@@ -970,16 +996,70 @@ abstract class AppDatabase : RoomDatabase() {
             }
         }
 
+        // v15: طرف‌حساب‌ها (طرف‌حساب چندطرف‌حسابی) — جدول party_accounts + پیوند فاکتور/پرداخت/چک.
+        // نام ستون‌ها camelCase است (همان قرارداد Room در بقیهٔ مهاجرت‌ها؛ سینک ابری با
+        // jsonKeysToCamel نگاشت می‌شود). کلینیک‌اکسپنس در مدل جدید «فاکتورِ طرف‌حساب» است و
+        // ExpensePayment می‌تواند «پرداختِ کلیِ طرف‌حساب» باشد (clinicExpenseId = 0 سنتینل).
+        private val MIGRATION_14_15 = object : androidx.room.migration.Migration(14, 15) {
+            override fun migrate(db: androidx.sqlite.db.SupportSQLiteDatabase) {
+                db.execSQL(
+                    """
+                    CREATE TABLE IF NOT EXISTS `party_accounts` (
+                        `id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL,
+                        `section` TEXT NOT NULL DEFAULT '',
+                        `code` TEXT NOT NULL DEFAULT '',
+                        `title` TEXT NOT NULL DEFAULT '',
+                        `name` TEXT NOT NULL DEFAULT '',
+                        `phone` TEXT NOT NULL DEFAULT '',
+                        `notes` TEXT NOT NULL DEFAULT '',
+                        `invoiceSeq` INTEGER NOT NULL DEFAULT 0,
+                        `ownerId` TEXT NOT NULL DEFAULT '',
+                        `syncId` TEXT NOT NULL,
+                        `updatedAt` INTEGER NOT NULL DEFAULT 0,
+                        `isDeleted` INTEGER NOT NULL DEFAULT 0
+                    )
+                    """.trimIndent()
+                )
+                try {
+                    db.execSQL("CREATE INDEX IF NOT EXISTS `index_party_accounts_section` ON `party_accounts` (`section`)")
+                    db.execSQL("CREATE INDEX IF NOT EXISTS `index_party_accounts_name` ON `party_accounts` (`name`)")
+                } catch (e: Exception) {
+                    android.util.Log.w("AppDatabase", "party_accounts index already present: ${e.message}")
+                }
+                db.addColumn("clinic_expenses", "partyAccountId INTEGER")
+                db.addColumn("clinic_expenses", "partyAccountSyncId TEXT NOT NULL DEFAULT ''")
+                db.addColumn("clinic_expenses", "invoiceNumber TEXT NOT NULL DEFAULT ''")
+                db.addColumn("expense_payments", "partyAccountId INTEGER")
+                db.addColumn("expense_payments", "partyAccountSyncId TEXT NOT NULL DEFAULT ''")
+                db.addColumn("payments", "transferPartyPaymentId INTEGER")
+            }
+        }
+
+        /**
+         * ۱۵ → ۱۶: دو ستون جدید روی personal_sub_accounts برای «حساب اشخاص»:
+         *  - openingBalance: مبلغ اولیه (افتتاحیه) شخص
+         *  - priority: شمارهٔ اولویت نمایش (کوچک‌تر = بالاتر در انتخابگرها)
+         * سینک ابری با EntityMapper/toMap + parsePulledEntity خودکار این ستون‌ها را
+         * هم می‌برد (نگاشت بازتابی)، پس تغییر دیگری لازم نیست.
+         */
+        private val MIGRATION_15_16 = object : androidx.room.migration.Migration(15, 16) {
+            override fun migrate(db: androidx.sqlite.db.SupportSQLiteDatabase) {
+                db.addColumn("personal_sub_accounts", "openingBalance INTEGER NOT NULL DEFAULT 0")
+                db.addColumn("personal_sub_accounts", "priority INTEGER NOT NULL DEFAULT 0")
+            }
+        }
+
         /** فهرستِ واحد و مرتبِ همهٔ مهاجرت‌ها — تنها منبعِ داده‌شده به Room. */
         val ALL_MIGRATIONS: Array<androidx.room.migration.Migration> = arrayOf(
             MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6,
             MIGRATION_6_7, MIGRATION_7_8, MIGRATION_8_9, MIGRATION_9_10, MIGRATION_10_11,
-            MIGRATION_11_12, MIGRATION_12_13, MIGRATION_13_14
+            MIGRATION_11_12, MIGRATION_12_13, MIGRATION_13_14, MIGRATION_14_15,
+            MIGRATION_15_16
         )
 
         const val SCHEMA_VERSION = 1
         /** نسخهٔ فعلیِ طرحِ Room — باید با مقدارِ @Database(version=...) هم‌مقدار بماند. */
-        const val DB_VERSION = 14
+        const val DB_VERSION = 16
         private const val DATABASE_NAME = "dental_pro_database"
 
         @Volatile

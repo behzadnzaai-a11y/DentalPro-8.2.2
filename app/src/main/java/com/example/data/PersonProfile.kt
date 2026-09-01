@@ -48,6 +48,12 @@ data class PersonProfile(
     /** عنوان شخص، مثلاً «تأمین‌کننده مواد مصرفی» یا «همکار». */
     val title: String = "",
     val nature: PersonNature = PersonNature.NONE,
+    /** مبلغ اولیه (افتتاحیهٔ حساب شخص) — در جمعِ جریات شخص لحاظ می‌شود. */
+    val openingBalance: Long = 0,
+    /** شمارهٔ اولویت نمایش (کوچک‌تر = بالاتر). اشخاص اولویت‌دار اول لیست می‌آیند. */
+    val priority: Int = 0,
+    /** ستاره‌دار — با [PersonalSubAccount.isQuickSelect] یکسان است. */
+    val isStarred: Boolean = false,
     val syncId: String = ""
 ) {
     /** نام کامل — همان کلیدی که ریزحساب‌ها و تراکنش‌ها با آن به شخص وصل می‌شوند. */
@@ -61,6 +67,9 @@ data class PersonProfile(
             category = PERSONS_CATEGORY,
             parentName = title.trim(),
             ledgerSide = nature.storageKey,
+            openingBalance = openingBalance,
+            priority = priority,
+            isQuickSelect = isStarred,
             updatedAt = System.currentTimeMillis()
         ).let { if (syncId.isNotBlank()) it.copy(syncId = syncId) else it }
 
@@ -73,6 +82,9 @@ data class PersonProfile(
                 lastName = parts.getOrNull(1).orEmpty(),
                 title = sub.parentName.trim(),
                 nature = PersonNature.fromStorage(sub.ledgerSide),
+                openingBalance = sub.openingBalance,
+                priority = sub.priority,
+                isStarred = sub.isQuickSelect,
                 syncId = sub.syncId
             )
         }

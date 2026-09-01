@@ -232,6 +232,13 @@ class SyncEngine(
                             upsertRemoteDocument(Supabase.TABLE_EXPENSE_PAYMENTS, record.syncId, mutableData)
                         }
                     }
+                    "party_accounts" -> {
+                        val record = database.partyAccountDao().getBySyncId(op.recordSyncId)
+                        if (record != null) {
+                            val mutableData = com.example.util.EntityMapper.toMap(record).toMutableMap()
+                            upsertRemoteDocument(Supabase.TABLE_PARTY_ACCOUNTS, record.syncId, mutableData)
+                        }
+                    }
                     "clinic_settings" -> {
                         val record = database.clinicSettingsDao().getSettingsOnce()
                         if (record != null) {
@@ -487,6 +494,14 @@ class SyncEngine(
     private suspend fun resolveMaintenanceId(rawId: Long?, syncId: String): Long? =
         if (syncId.isNotBlank()) database.equipmentMaintenanceDao().getBySyncId(syncId)?.id else rawId
 
+    private suspend fun resolvePartyAccountId(rawId: Long?, syncId: String): Long? {
+        if (rawId == null || rawId <= 0L) return null
+        if (syncId.isNotBlank()) {
+            database.partyAccountDao().getBySyncId(syncId)?.let { return it.id }
+        }
+        return database.partyAccountDao().getById(rawId)?.id
+    }
+
     private suspend fun resolveClinicExpenseId(rawId: Long, syncId: String): Long =
         if (syncId.isNotBlank()) database.clinicExpenseDao().getBySyncId(syncId)?.id ?: 0L else rawId
 
@@ -515,7 +530,8 @@ class SyncEngine(
                 Supabase.TABLE_TREATMENT_TEMPLATES,
                 Supabase.TABLE_DRUG_TEMPLATES,
                 Supabase.TABLE_LAB_SERVICES,
-                Supabase.TABLE_APP_CALENDAR_EVENTS
+                Supabase.TABLE_APP_CALENDAR_EVENTS,
+                Supabase.TABLE_PARTY_ACCOUNTS
             ),
             // موج ۲ — والدین ریشه
             listOf(
@@ -814,7 +830,8 @@ class SyncEngine(
                 val obj = raw.copy(
                     labOrderId = resolveLabOrderId(raw.labOrderId, raw.labOrderSyncId),
                     vendorId = resolveVendorId(raw.vendorId, raw.vendorSyncId),
-                    maintenanceId = resolveMaintenanceId(raw.maintenanceId, raw.maintenanceSyncId)
+                    maintenanceId = resolveMaintenanceId(raw.maintenanceId, raw.maintenanceSyncId),
+                    partyAccountId = resolvePartyAccountId(raw.partyAccountId, raw.partyAccountSyncId)
                 )
                 if (local == null) database.clinicExpenseDao().insertExpense(obj)
                 else if (remoteUpdatedAt >= local.updatedAt || local.updatedAt == 0L || remoteUpdatedAt == 0L) database.clinicExpenseDao().insertExpense(obj.copy(id = local.id))
@@ -824,7 +841,8 @@ class SyncEngine(
                 val raw = parsePulledEntity(json, com.example.data.ExpensePayment::class.java, gson, local)
                 val obj = raw.copy(
                     clinicExpenseId = resolveClinicExpenseId(raw.clinicExpenseId, raw.clinicExpenseSyncId),
-                    bankAccountId = resolveBankAccountId(raw.bankAccountId, raw.bankAccountSyncId)
+                    bankAccountId = resolveBankAccountId(raw.bankAccountId, raw.bankAccountSyncId),
+                    partyAccountId = resolvePartyAccountId(raw.partyAccountId, raw.partyAccountSyncId)
                 )
                 if (local == null) database.expensePaymentDao().insertExpensePayment(obj)
                 else if (remoteUpdatedAt >= local.updatedAt || local.updatedAt == 0L || remoteUpdatedAt == 0L) database.expensePaymentDao().insertExpensePayment(obj.copy(id = local.id))
@@ -885,6 +903,12 @@ class SyncEngine(
                 val obj = parsePulledEntity(json, com.example.data.LabService::class.java, gson, local)
                 if (local == null) database.labServiceDao().insertLabService(obj)
                 else if (remoteUpdatedAt >= local.updatedAt || local.updatedAt == 0L || remoteUpdatedAt == 0L) database.labServiceDao().insertLabService(obj.copy(id = local.id))
+            }
+            Supabase.TABLE_PARTY_ACCOUNTS -> {
+                val local = database.partyAccountDao().getBySyncId(docId)
+                val obj = parsePulledEntity(json, com.example.data.PartyAccount::class.java, gson, local)
+                if (local == null) database.partyAccountDao().insertPartyAccount(obj)
+                else if (remoteUpdatedAt >= local.updatedAt || local.updatedAt == 0L || remoteUpdatedAt == 0L) database.partyAccountDao().insertPartyAccount(obj.copy(id = local.id))
             }
             Supabase.TABLE_FIXED_INCOMES -> {
                 val local = database.fixedIncomeDao().getBySyncId(docId)

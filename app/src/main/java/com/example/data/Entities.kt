@@ -125,6 +125,7 @@ data class Payment(
     val transferExpenseId: Long? = null,          // ClinicExpense ساخته‌شده (اگر هزینهٔ تازه ساخته شده باشد)
     val transferTransactionId: Long? = null,      // PersonalTransaction ساخته‌شده در انتقال به حساب شخصی/اشخاص
     val transferChildrenExpenseId: Long? = null,  // ChildrenExpense ساخته‌شده در انتقال به «حساب اشخاص»
+    val transferPartyPaymentId: Long? = null,     // ExpensePayment ساخته‌شده در انتقال چک به «طرف حساب» (طرف‌حساب هزینه‌های مطب)
     // ——— تأییدهای یک‌بارمصرف ———
     // پس از فعال‌شدن دیگر غیرفعال نمی‌شوند (درخواست: «یک تیک یکبار فعال»).
     val bankReceiptConfirmed: Boolean = false,    // دریافت بانکی تأیید شد (برای چکِ پاس‌شده)
@@ -249,6 +250,14 @@ data class ClinicExpense(
     // LAB (لابراتوار) / CONSUMABLES (مواد مصرفی) / EQUIPMENT (تجهیزات، تعمیرات، نوسازی)
     // / RUNNING (هزینه‌های جاری مطب) / OTHER (سایر هزینه‌ها). خالی = دسته‌بندی‌نشده.
     val expenseGroup: String = "",
+    // ——— طرف حساب (طرف‌حساب چندطرف‌حسابی) ———
+    // هر رکورد clinic_expenses در مدل جدید یک «فاکتور» (بدهی ما) است که به یک طرف حساب
+    // (party_accounts) وصل می‌شود؛ مثلاً «لابراتوار آ». پرداختِ هنگام ثبت لازم نیست.
+    // partyAccountId = شناسهٔ محلی طرف‌حساب؛ partyAccountSyncId = شناسهٔ سینکِ ابری (بین‌دستگاهی)؛
+    // invoiceNumber = شمارهٔ فاکتورِ خودکارِ per-party (مثل LAB-A-0001).
+    val partyAccountId: Long? = null,
+    val partyAccountSyncId: String = "",
+    val invoiceNumber: String = "",
     val amount: Long,
     val description: String = "",
     val date: Long = System.currentTimeMillis(),
@@ -288,6 +297,13 @@ data class ExpensePayment(
     val chequeDueDate: Long? = null,
     val chequeBank: String? = null,
     val chequeStatus: String = "PENDING", // PENDING, CLEARED, BOUNCED
+    // ——— طرف حساب (طرف‌حساب چندطرف‌حسابی) ———
+    // اگر clinicExpenseId = 0 باشد، این پرداخت «کلیِ طرف‌حساب» است (مستقل از یک فاکتور مشخص) و
+    // partyAccountId تعیین‌کنندهٔ طرف‌حساب است؛ در غیر این صورت پرداختِ همان فاکتور است.
+    // پشتیبانی از پرداختِ «بدون فاکتورِ مشخص» به‌صورت سنتینل ۰ انجام می‌شود تا ستونِ
+    // clinicExpenseId بدون مهاجرتِ بازسازیِ جدول، قابل‌استفاده بماند.
+    val partyAccountId: Long? = null,
+    val partyAccountSyncId: String = "",
     val date: Long = System.currentTimeMillis(),
     val note: String = "",
     val ownerId: String = "", // auth.uid سوپابیس مالکِ این رکورد — برای ایزوله‌سازی کامل داده‌های هر مطب/حساب از حساب‌های دیگر
@@ -295,6 +311,135 @@ data class ExpensePayment(
     val updatedAt: Long = System.currentTimeMillis(),
     val isDeleted: Boolean = false
 )
+
+/**
+ * آیا این پرداخت در دفترِ طرف حساب می‌نشیند؟
+ * چکِ انتقالیِ برگشتی (BOUNCED) از دفتر خارج می‌شود تا «چک برگشتی در پرداختی ننشیند»
+ * (هم‌اهنگ با [Payment] که چک برگشتی را از محاسباتِ موجودی حذف می‌کند).
+ */
+fun ExpensePayment.countsAsPartyPayment(): Boolean =
+    !(method == "CHEQUE" && chequeStatus == "BOUNCED")
+
+/**
+ * بخش‌های اصلیِ هابِ «هزینه‌های مطب» در مدل طرف‌حساب (طرف‌حساب چندطرف‌حسابی).
+ *
+ * هر بخش چند «طرف حساب» می‌گیرد: مثلاً بخش لابراتوار ← «لابراتوار آ»، «لابراتوار ب»؛
+ * بخش فنی مهندسی ← «فنی مهندسی آ»، «فنی مهندسی ب»؛ بخش فروشگاه مواد دندانپزشکی ←
+ * «فروشگاه آ»، «فروشگاه ب» و… هر طرف‌حساب دفترِ فاکتور/پرداختِ مستقل خودش را دارد.
+ */
+enum class PartySection(val key: String, val faTitle: String, val enTitle: String) {
+    LAB("LAB", "لابراتوار", "Labs"),
+    ENGINEERING("ENGINEERING", "فنی مهندسی و تعمیرات", "Engineering & Maintenance"),
+    STORE("STORE", "فروشگاه مواد دندانپزشکی", "Dental Supply Store"),
+    RUNNING("RUNNING", "هزینه‌های جاری مطب", "Running Costs"),
+    OTHER("OTHER", "سایر هزینه‌های مطب", "Other Expenses");
+
+    fun title(isPersian: Boolean) = if (isPersian) faTitle else enTitle
+
+    companion object {
+        val primary = listOf(LAB, ENGINEERING, STORE, RUNNING)
+
+        fun fromKey(key: String?): PartySection =
+            entries.firstOrNull { it.key == key?.trim() } ?: OTHER
+
+        /** نگاشت از گروه قدیمیِ ExpenseGroup به بخشِ جدید — برای داده/کدهای قبلی. */
+        fun fromExpenseGroup(group: ExpenseGroup): PartySection = when (group) {
+            ExpenseGroup.LAB -> LAB
+            ExpenseGroup.CONSUMABLES -> STORE
+            ExpenseGroup.EQUIPMENT -> ENGINEERING
+            ExpenseGroup.RUNNING -> RUNNING
+            ExpenseGroup.OTHER -> OTHER
+        }
+    }
+}
+
+/**
+ * طرف حساب / طرف‌حسابِ چندطرف‌حسابی در «هزینه‌های مطب».
+ *
+ * هر طرف‌حساب (مثلاً «لابراتوار آ») مستقل از بقیه طرف‌حساب‌هاست: فاکتورها (clinic_expenses با
+ * partyAccountId)، پرداخت‌ها (expense_payments با partyAccountId)، چک‌های انتقالی و
+ * صورتحساب‌ها — همه per-party. مانده = Σ فاکتورها − Σ پرداختی‌ها (علامت‌دار) و «تسویه»
+ * هرگز به‌صورت وضعیت ذخیره نمی‌شود.
+ */
+@Entity(
+    tableName = "party_accounts",
+    indices = [
+        Index(value = ["section"]),
+        Index(value = ["name"])
+    ]
+)
+data class PartyAccount(
+    @PrimaryKey(autoGenerate = true) val id: Long = 0,
+    val section: String = PartySection.OTHER.key,      // PartySection.key
+    val code: String = "",                             // کدِ خودکار طرف‌حساب، مثل LAB-A
+    val title: String = "",                            // عنوانِ بخش: «لابراتوار»، «فنی مهندسی»، «فروشگاه»
+    val name: String = "",                             // نامِ طرف‌حساب: «آ»، «ب»، «نیازی»…
+    val phone: String = "",
+    val notes: String = "",
+    // شمارندهٔ فاکتورِ این طرف‌حساب — برای تولید invoiceNumber پشت‌سرهمِ per-party.
+    val invoiceSeq: Long = 0,
+    val ownerId: String = "",
+    val syncId: String = java.util.UUID.randomUUID().toString(),
+    val updatedAt: Long = System.currentTimeMillis(),
+    val isDeleted: Boolean = false
+)
+
+/** عنوانِ نمایشیِ طرف‌حساب: «لابراتوار آ»، «فروشگاه ب» و… — با [partyDisplayLabel]. */
+val PartyAccount.displayLabel: String
+    get() = partyDisplayLabel(title, name)
+
+/** آیا این فاکتور متعلق به این طرف‌حساب است؟ (ردیف‌های قدیمی با تطبیق نام هم شناخته می‌شوند.) */
+fun ClinicExpense.belongsToParty(party: PartyAccount): Boolean {
+    if (isDeleted) return false
+    if (partyAccountId != null) return partyAccountId == party.id
+    val n = party.name.trim()
+    if (n.isBlank()) return false
+    return subAccountName.trim().equals(n, ignoreCase = true)
+}
+
+/**
+ * دفترِ یک طرف حساب: فاکتورها (+) و پرداختی‌ها (−).
+ *
+ * پرداختیِ «کلیِ طرف‌حساب» (clinicExpenseId = 0 با partyAccountId) و پرداختیِ روی فاکتورهای
+ * همان طرف‌حساب هر دو شمرده می‌شوند. مانده علامت‌دار است: مثبت = ما به طرف‌حساب بدهکاریم،
+ * منفی = طرف‌حساب به ما بدهکار است (بستانکاری). هیچ‌جا coerceAtLeast(0) نمی‌خورد.
+ */
+fun partyLedgerOf(
+    party: PartyAccount,
+    invoices: List<ClinicExpense>,
+    payments: List<ExpensePayment>
+): PartyLedger {
+    val partyInvoices = invoices.filter { it.belongsToParty(party) }
+    if (partyInvoices.isEmpty() && payments.none { !it.isDeleted && it.countsAsPartyPayment() && it.partyAccountId == party.id }) {
+        return PartyLedger(0L, 0L)
+    }
+    val invoiceIds = partyInvoices.map { it.id }.toSet()
+    val paid = payments
+        .filter { !it.isDeleted && it.countsAsPartyPayment() && (it.partyAccountId == party.id || it.clinicExpenseId in invoiceIds) }
+        .sumOf { it.amount }
+    return PartyLedger(orders = partyInvoices.sumOf { it.amount }, paid = paid)
+}
+
+/**
+ * دفترِ کل یک بخش (LAB/ENGINEERING/STORE/…): جمعِ همهٔ فاکتورها و پرداختی‌های
+ * همهٔ طرف‌حساب‌های همان بخش — برای کارت‌های بالای هاب.
+ */
+fun partySectionLedger(
+    section: PartySection,
+    parties: List<PartyAccount>,
+    invoices: List<ClinicExpense>,
+    payments: List<ExpensePayment>
+): PartyLedger {
+    val sectionParties = parties.filter { !it.isDeleted && it.section.trim() == section.key }
+    if (sectionParties.isEmpty()) return PartyLedger(0L, 0L)
+    val partyIds = sectionParties.map { it.id }.toSet()
+    val sectionInvoices = invoices.filter { !it.isDeleted && it.partyAccountId != null && it.partyAccountId in partyIds }
+    val invoiceIds = sectionInvoices.map { it.id }.toSet()
+    val paid = payments
+        .filter { !it.isDeleted && it.countsAsPartyPayment() && ((it.partyAccountId != null && it.partyAccountId in partyIds) || it.clinicExpenseId in invoiceIds) }
+        .sumOf { it.amount }
+    return PartyLedger(orders = sectionInvoices.sumOf { it.amount }, paid = paid)
+}
 
 /**
  * دفتر یک طرف‌حساب.
@@ -585,6 +730,13 @@ data class PersonalSubAccount(
     val grandParentName: String = "",
     val isQuickSelect: Boolean = false,
     val ledgerSide: String = "NONE", // DEBTOR (بدهکار), CREDITOR (بستانکار), NONE
+    // مبلغ اولیه (افتتاحیه) — برای «اشخاص» (category = PERSONS) ماندهٔ آغازین شخص را
+    // می‌سازد؛ برای بقیهٔ سرفصل‌ها صفر می‌ماند. فقط محاسبات نمایشی از آن استفاده
+    // می‌کنند و هیچ سند بانکی/دفتری خودکار ایجاد نمی‌کند.
+    val openingBalance: Long = 0,
+    // شمارهٔ اولویت نمایش — کوچک‌تر = بالاتر؛ اشخاصِ ستار‌دار/اولویت‌دار در
+    // انتخابگرهای تراکنش (مثل هزینه/درآمد شخصی) اول لیست ظاهر می‌شوند.
+    val priority: Int = 0,
     val ownerId: String = "", // auth.uid سوپابیس مالکِ این رکورد — برای ایزوله‌سازی کامل داده‌های هر مطب/حساب از حساب‌های دیگر
     val syncId: String = java.util.UUID.randomUUID().toString(),
     val updatedAt: Long = System.currentTimeMillis(),
