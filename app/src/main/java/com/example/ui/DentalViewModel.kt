@@ -162,6 +162,11 @@ class DentalViewModel(application: Application) : AndroidViewModel(application) 
             kotlinx.coroutines.delay(5_000)
             checkForAppUpdate()
         }
+        // Backfill یک‌باره و idempotent: داده‌های قدیمیِ هزینه‌ها به ظرف‌های حساب
+        // (party_accounts) پیوند می‌خورند تا هابِ جدید بلافاصله درست کار کند.
+        viewModelScope.launch(Dispatchers.IO) {
+            runCatching { repository.migrateLegacyExpenseParties() }
+        }
         // کلیدهای API از سرور خوانده می‌شوند (منبع حقیقت سرور است؛ کش محلی فقط
         // برای کار در حالت آفلاین نگه داشته می‌شود).
         viewModelScope.launch(Dispatchers.IO) {
@@ -1645,6 +1650,10 @@ class DentalViewModel(application: Application) : AndroidViewModel(application) 
     val maintenanceList = repository.allMaintenance.stateIn(viewModelScope, SharingStarted.Lazily, emptyList())
     val clinicExpenses = repository.allExpenses.stateIn(viewModelScope, SharingStarted.Lazily, emptyList())
     val allExpensePayments = repository.allExpensePayments.stateIn(viewModelScope, SharingStarted.Lazily, emptyList())
+    // ظرف‌های حساب (طرف‌حساب چندظرفیِ هزینه‌های مطب) — فقط ظرف‌های فعال.
+    val partyAccounts: StateFlow<List<com.example.data.PartyAccount>> = repository.allPartyAccounts
+        .map { list -> list.filter { !it.isDeleted }.sortedWith(compareBy({ it.section }, { it.name })) }
+        .stateIn(viewModelScope, SharingStarted.Lazily, emptyList())
     val personalTransactions = repository.allTransactions.stateIn(viewModelScope, SharingStarted.Lazily, emptyList())
     val allTreatments = repository.allTreatments.stateIn(viewModelScope, SharingStarted.Lazily, emptyList())
     val allPayments = repository.allPayments.stateIn(viewModelScope, SharingStarted.Lazily, emptyList())
@@ -2331,6 +2340,20 @@ class DentalViewModel(application: Application) : AndroidViewModel(application) 
     private suspend fun DentalRepository.syncChequeTransferDocs(payment: Payment) {
         if (payment.type != "CHEQUE") return
 
+        payment.transferPartyPaymentId?.let { id ->
+            getExpensePaymentByIdOnce(id)?.let { doc ->
+                insertExpensePayment(
+                    doc.copy(
+                        amount = payment.amount,
+                        chequeNumber = payment.chequeNumber,
+                        chequeBank = payment.chequeBank,
+                        chequeDueDate = payment.chequeDueDate,
+                        chequeStatus = if (payment.chequeStatus == "BOUNCED") "BOUNCED" else "PENDING",
+                        updatedAt = System.currentTimeMillis()
+                    )
+                )
+            }
+        }
         payment.transferExpensePaymentId?.let { id ->
             getExpensePaymentByIdOnce(id)?.let { doc ->
                 insertExpensePayment(
@@ -2501,29 +2524,27 @@ class DentalViewModel(application: Application) : AndroidViewModel(application) 
             )
             if (totalOrders > 0) {
                 val expDesc = "خرید از فروشنده ($name) - شرکت: $company - نوع کالا: $itemType"
-                val newExpId = repository.insertExpense(
+                // درخواست کاربر: «نیاز نیست به پرداخت هنگام ثبت» — فقط فاکتور ثبت می‌شود؛
+                // پرداخت از دفترِ ظرف حساب انجام می‌شود (نقد از صندوق / پیامک برداشت / چک).
+                val storeParty = repository.findOrCreateParty(
+                    com.example.data.PartySection.STORE,
+                    com.example.data.PartySection.STORE.faTitle,
+                    name
+                )
+                repository.insertExpense(
                     ClinicExpense(
-                        category = "فروشندگان",
+                        category = com.example.data.PartySection.STORE.faTitle,
+                        expenseGroup = com.example.data.PartySection.STORE.key,
+                        partyAccountId = storeParty.id,
                         amount = totalOrders,
                         description = expDesc,
                         date = System.currentTimeMillis(),
                         subAccountName = name,
-                        paymentMethod = if (totalPaid >= totalOrders) "CARD_TRANSFER" else "DEBT",
+                        paymentMethod = "DEBT",
                         invoicePhotoFileId = invoicePhotoFileId,
                         vendorId = newVendorId
                     )
                 )
-                if (totalPaid > 0) {
-                    repository.insertExpensePayment(
-                        ExpensePayment(
-                            clinicExpenseId = newExpId,
-                            amount = totalPaid,
-                            method = "CARD_TRANSFER",
-                            date = System.currentTimeMillis(),
-                            note = "پرداخت اولیه ثبت‌شده"
-                        )
-                    )
-                }
             }
         }
     }
@@ -2547,28 +2568,25 @@ class DentalViewModel(application: Application) : AndroidViewModel(application) 
                 val invStr = if (!invoiceNum.isNullOrBlank()) " - فاکتور: $invoiceNum" else ""
                 val detStr = if (!invoiceDetails.isNullOrBlank()) " ($invoiceDetails)" else ""
                 val expDesc = "خرید از فروشنده ($name) - $company$invStr$detStr"
-                val newExpId = repository.insertExpense(
+                // فقط فاکتور؛ پرداختِ هنگام ثبت حذف شد (درخواست کاربر).
+                val storeParty = repository.findOrCreateParty(
+                    com.example.data.PartySection.STORE,
+                    com.example.data.PartySection.STORE.faTitle,
+                    name
+                )
+                repository.insertExpense(
                     ClinicExpense(
-                        category = "فروشندگان",
+                        category = com.example.data.PartySection.STORE.faTitle,
+                        expenseGroup = com.example.data.PartySection.STORE.key,
+                        partyAccountId = storeParty.id,
                         amount = totalOrders,
                         description = expDesc,
                         date = System.currentTimeMillis(),
                         subAccountName = name,
-                        paymentMethod = if (totalPaid >= totalOrders) "CARD_TRANSFER" else "DEBT",
+                        paymentMethod = "DEBT",
                         vendorId = newVendorId
                     )
                 )
-                if (totalPaid > 0) {
-                    repository.insertExpensePayment(
-                        ExpensePayment(
-                            clinicExpenseId = newExpId,
-                            amount = totalPaid,
-                            method = "CARD_TRANSFER",
-                            date = System.currentTimeMillis(),
-                            note = "پرداخت اولیه ثبت‌شده"
-                        )
-                    )
-                }
             }
         }
     }
@@ -2855,9 +2873,17 @@ class DentalViewModel(application: Application) : AndroidViewModel(application) 
             val matchedVendor = vendors.value.firstOrNull { v ->
                 !v.isDeleted && v.name.trim().equals(labName.trim(), ignoreCase = true)
             }
+            // فاکتورِ سفارش به ظرفِ همان لابراتوار وصل می‌شود («لابراتوار آ» جدا از «لابراتوار ب»).
+            val labParty = repository.findOrCreateParty(
+                com.example.data.PartySection.LAB,
+                com.example.data.PartySection.LAB.faTitle,
+                labName
+            )
             repository.insertExpense(
                 ClinicExpense(
-                    category = "لابراتوار",
+                    category = com.example.data.PartySection.LAB.faTitle,
+                    expenseGroup = com.example.data.PartySection.LAB.key,
+                    partyAccountId = labParty.id,
                     amount = cost,
                     description = expDesc,
                     date = System.currentTimeMillis(),
@@ -2888,6 +2914,9 @@ class DentalViewModel(application: Application) : AndroidViewModel(application) 
      * نمی‌شود.
      */
     private suspend fun DentalRepository.reverseChequeTransferDocs(payment: Payment) {
+        payment.transferPartyPaymentId?.let { id ->
+            getExpensePaymentByIdOnce(id)?.let { deleteExpensePayment(it) }
+        }
         payment.transferExpensePaymentId?.let { id ->
             getExpensePaymentByIdOnce(id)?.let { deleteExpensePayment(it) }
         }
@@ -2906,6 +2935,7 @@ class DentalViewModel(application: Application) : AndroidViewModel(application) 
     private fun Payment.clearedOfTransfer(): Payment = copy(
         transferredTo = null,
         transferDate = null,
+        transferPartyPaymentId = null,
         transferExpensePaymentId = null,
         transferExpenseId = null,
         transferTransactionId = null,
@@ -3278,9 +3308,18 @@ class DentalViewModel(application: Application) : AndroidViewModel(application) 
             )
             if (cost > 0) {
                 val expDesc = "تعمیر و نگهداری ($equipment) - $desc"
+                // فاکتورِ سرویس به ظرفِ «فنی مهندسی» با نام تکنسین وصل می‌شود
+                // (هر تکنسین/شرکتِ تعمیراتی ظرفِ خودش را دارد).
+                val engParty = repository.findOrCreateParty(
+                    com.example.data.PartySection.ENGINEERING,
+                    com.example.data.PartySection.ENGINEERING.faTitle,
+                    "تکنسین تجهیزات"
+                )
                 repository.insertExpense(
                     ClinicExpense(
-                        category = "تعمیر و نگهداری",
+                        category = com.example.data.PartySection.ENGINEERING.faTitle,
+                        expenseGroup = com.example.data.PartySection.ENGINEERING.key,
+                        partyAccountId = engParty.id,
                         amount = cost,
                         description = expDesc,
                         date = date,
@@ -3311,9 +3350,17 @@ class DentalViewModel(application: Application) : AndroidViewModel(application) 
             if (cost > 0) {
                 val invStr = if (!invoiceNum.isNullOrBlank()) " - فاکتور: $invoiceNum" else ""
                 val expDesc = "تعمیر و نگهداری ($equipment) - $desc$invStr"
+                // ظرفِ فنی مهندسی با نامِ واقعیِ تکنسین/شرکتِ تعمیراتی (نه نامِ کلی).
+                val engParty = repository.findOrCreateParty(
+                    com.example.data.PartySection.ENGINEERING,
+                    com.example.data.PartySection.ENGINEERING.faTitle,
+                    techName
+                )
                 repository.insertExpense(
                     ClinicExpense(
-                        category = "تعمیر و نگهداری",
+                        category = com.example.data.PartySection.ENGINEERING.faTitle,
+                        expenseGroup = com.example.data.PartySection.ENGINEERING.key,
+                        partyAccountId = engParty.id,
                         amount = cost,
                         description = expDesc,
                         date = date,
@@ -3465,6 +3512,193 @@ class DentalViewModel(application: Application) : AndroidViewModel(application) 
         if (!authorizeDomain("expenses", "DELETE_EXPENSE", isDelete = true)) return
         viewModelScope.launch {
             repository.deleteExpense(expense)
+        }
+    }
+
+    // ======================================================================
+    //  ظرف‌های حساب (Party Accounts) — طرف‌حساب‌های چندظرفی هزینه‌های مطب
+    // ======================================================================
+
+    /** افزودن ظرف جدید: مثلاً (LAB, «لابراتوار», «آ»). بدون تکرارِ (بخش، نام). */
+    fun addPartyAccount(section: com.example.data.PartySection, name: String, phone: String = "") {
+        val trimmed = name.trim()
+        if (trimmed.isBlank()) return
+        if (!authorizeDomain("expenses", "ADD_PARTY_ACCOUNT")) return
+        viewModelScope.launch {
+            val existing = partyAccounts.value.firstOrNull {
+                it.section.trim() == section.key && it.name.trim().equals(trimmed, ignoreCase = true)
+            }
+            if (existing != null) return@launch
+            val letter = ('A'.code + partyAccounts.value.count { it.section.trim() == section.key }).toChar().toString()
+            val code = when (section) {
+                com.example.data.PartySection.LAB -> "LAB"
+                com.example.data.PartySection.ENGINEERING -> "ENG"
+                com.example.data.PartySection.STORE -> "STORE"
+                com.example.data.PartySection.RUNNING -> "RUN"
+                com.example.data.PartySection.OTHER -> "OTHER"
+            } + letter
+            repository.insertPartyAccount(
+                com.example.data.PartyAccount(
+                    section = section.key,
+                    code = code,
+                    title = section.faTitle,
+                    name = trimmed,
+                    phone = phone.trim()
+                )
+            )
+        }
+    }
+
+    fun updatePartyAccount(account: com.example.data.PartyAccount) {
+        if (!authorizeDomain("expenses", "UPDATE_PARTY_ACCOUNT")) return
+        viewModelScope.launch {
+            repository.insertPartyAccount(account.copy(updatedAt = System.currentTimeMillis()))
+        }
+    }
+
+    /** حذف نرمِ ظرف — فاکتورها و پرداخت‌هایش برای حفظ دفتر باقی می‌مانند. */
+    fun deletePartyAccount(account: com.example.data.PartyAccount) {
+        if (!authorizeDomain("expenses", "DELETE_PARTY_ACCOUNT", isDelete = true)) return
+        viewModelScope.launch {
+            repository.deletePartyAccount(account)
+        }
+    }
+
+    /**
+     * صدور فاکتور برای یک ظرف — بدون پرداختِ هنگام ثبت (خواستهٔ کاربر).
+     * فاکتور در clinic_expenses با partyAccountId و شمارهٔ خودکارِ per-party می‌نشیند.
+     */
+    fun addPartyInvoice(
+        party: com.example.data.PartyAccount,
+        amount: Long,
+        description: String = "",
+        date: Long = System.currentTimeMillis()
+    ) {
+        if (amount <= 0L) return
+        if (!authorizeDomain("expenses", "ADD_EXPENSE")) return
+        viewModelScope.launch {
+            repository.insertExpense(
+                ClinicExpense(
+                    category = party.title.ifBlank { party.section },
+                    expenseGroup = party.section,
+                    partyAccountId = party.id,
+                    amount = amount,
+                    description = description.trim(),
+                    date = date,
+                    subAccountName = party.name,
+                    paymentMethod = "DEBT"
+                )
+            )
+        }
+    }
+
+    /**
+     * پرداخت به ظرف حساب — از هر درگاهی: نقد از صندوق (bankAccountId = صندوق)،
+     * کارت/کارت‌خوان (bankAccountId = حساب بانکی)، برداشت پیامک بانکی
+     * (sourceSmsNativeId) یا انتقال چک (method = CHEQUE با شمارهٔ چک).
+     * پرداختِ «کلیِ ظرف» (بدون فاکتورِ مشخص) با clinicExpenseId = 0 ثبت می‌شود.
+     */
+    fun addPartyPayment(
+        party: com.example.data.PartyAccount,
+        amount: Long,
+        method: String = "CARD_TRANSFER",
+        bankAccountId: Long? = null,
+        date: Long = System.currentTimeMillis(),
+        note: String = "",
+        chequeNumber: String? = null,
+        chequeDueDate: Long? = null,
+        chequeBank: String? = null,
+        sourceSmsNativeId: String = ""
+    ) {
+        if (amount <= 0L) return
+        if (!authorizeDomain("expenses", "ADD_EXPENSE_PAYMENT")) return
+        viewModelScope.launch {
+            repository.insertExpensePayment(
+                ExpensePayment(
+                    clinicExpenseId = 0L,
+                    partyAccountId = party.id,
+                    amount = amount,
+                    method = method,
+                    bankAccountId = bankAccountId,
+                    sourceSmsNativeId = sourceSmsNativeId,
+                    chequeNumber = chequeNumber,
+                    chequeDueDate = chequeDueDate,
+                    chequeBank = chequeBank,
+                    chequeStatus = if (method == "CHEQUE") "PENDING" else "CLEARED",
+                    date = date,
+                    note = note.ifBlank { "پرداخت به ${party.displayLabel}" }
+                )
+            )
+        }
+    }
+
+    /** پرداختِ یک فاکتورِ مشخصِ یک ظرف (مبلغ می‌تواند از ماندهٔ فاکتور بیشتر باشد = بستانکاری). */
+    fun payPartyInvoice(
+        party: com.example.data.PartyAccount,
+        invoice: ClinicExpense,
+        amount: Long,
+        method: String = "CARD_TRANSFER",
+        bankAccountId: Long? = null,
+        date: Long = System.currentTimeMillis(),
+        note: String = ""
+    ) {
+        if (amount <= 0L) return
+        if (!authorizeDomain("expenses", "ADD_EXPENSE_PAYMENT")) return
+        viewModelScope.launch {
+            repository.insertExpensePayment(
+                ExpensePayment(
+                    clinicExpenseId = invoice.id,
+                    partyAccountId = party.id,
+                    amount = amount,
+                    method = method,
+                    bankAccountId = bankAccountId,
+                    date = date,
+                    note = note.ifBlank { "پرداخت فاکتور ${invoice.invoiceNumber.ifBlank { invoice.id.toString() }} — ${party.displayLabel}" }
+                )
+            )
+        }
+    }
+
+    /**
+     * انتقال چک به یک ظرف حساب — یک سند واحد: ExpensePayment چکی با partyAccountId.
+     * برخلاف مسیرهای قدیمی، دیگر ClinicExpenseٔ تازه ساخته نمی‌شود و اشاره‌گرِ
+     * transferPartyPaymentId روی چک نگه داشته می‌شود تا وصول/برگشت/لغوِ انتقال
+     * اثرش را روی دفتر ظرف برساند.
+     */
+    fun transferChequeToParty(payment: Payment, party: com.example.data.PartyAccount) {
+        if (!authorizeDomain("cheques", "TRANSFER_CHEQUE_EXPENSE")) return
+        if (!canTransferCheque(payment)) return
+        viewModelScope.launch {
+            repository.inTransaction {
+                val desc = "انتقال چک شماره ${payment.chequeNumber ?: ""} (بانک ${payment.chequeBank ?: ""}) به ${party.displayLabel}"
+                val partyPaymentId = repository.insertExpensePayment(
+                    ExpensePayment(
+                        clinicExpenseId = 0L,
+                        partyAccountId = party.id,
+                        amount = payment.amount,
+                        method = "CHEQUE",
+                        chequeNumber = payment.chequeNumber,
+                        chequeDueDate = payment.chequeDueDate,
+                        chequeBank = payment.chequeBank,
+                        chequeStatus = "PENDING",
+                        date = System.currentTimeMillis(),
+                        note = desc
+                    )
+                )
+                updatePayment(
+                    payment.copy(
+                        chequeStatus = "TRANSFERRED",
+                        transferredTo = party.displayLabel,
+                        transferDate = System.currentTimeMillis(),
+                        transferPartyPaymentId = partyPaymentId,
+                        transferExpensePaymentId = null,
+                        transferExpenseId = null,
+                        transferTransactionId = null,
+                        transferChildrenExpenseId = null,
+                        updatedAt = System.currentTimeMillis()
+                    )
+                )
+            }
         }
     }
 
@@ -4050,6 +4284,20 @@ class DentalViewModel(application: Application) : AndroidViewModel(application) 
                                     note = alloc.description
                                 )
                             )
+                            // برداشتِ پیامکی به «ظرف حساب» (طرف‌حسابِ هزینه‌های مطب) —
+                            // پرداختِ کلیِ ظرف بدون نیاز به فاکتورِ مشخص.
+                            "PARTY" -> repository.insertExpensePayment(
+                                ExpensePayment(
+                                    clinicExpenseId = 0L,
+                                    partyAccountId = alloc.targetId ?: return@forEach,
+                                    amount = alloc.amount,
+                                    method = "CARD_TRANSFER",
+                                    bankAccountId = bankAccountId,
+                                    sourceSmsNativeId = smsNativeId,
+                                    date = txnDate,
+                                    note = alloc.description
+                                )
+                            )
                             "PERSON" -> {
                                 // حساب اشخاص: در بخش فرزندان با نام شخص و ریز حساب قابل گزارش‌گیری است
                                 repository.insertChildrenExpense(
@@ -4099,6 +4347,7 @@ class DentalViewModel(application: Application) : AndroidViewModel(application) 
                         "PATIENT" -> "بیمار: ${alloc.targetName}"
                         "MISC_INCOME" -> "درآمد متفرقه"
                         "CLINIC_EXPENSE" -> "هزینه: ${alloc.targetName}"
+                        "PARTY" -> "طرف‌حساب: ${alloc.targetName}"
                         "PERSONAL_SUB" -> "شخصی: ${alloc.targetName}"
                         "PERSON" -> "شخص: ${alloc.targetName}"
                         else -> alloc.targetName.ifBlank { "سایر" }

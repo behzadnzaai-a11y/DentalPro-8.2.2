@@ -7702,6 +7702,14 @@ fun VendorsScreen(viewModel: DentalViewModel) {
                 Text(if (showForm) viewModel.label("cancel") else viewModel.label("add_vendor"))
             }
         }
+        Text(
+            text = if (isPersian)
+                "فاکتورها و پرداخت‌های این فروشنده در بخش «${com.example.data.PartySection.STORE.faTitle}» به‌صورت ظرفِ حسابِ مستقل ثبت و محاسبه می‌شود."
+            else
+                "This supplier's invoices & payments are tracked as an independent party account in the \"Dental Supply Store\" section.",
+            fontSize = 10.5.sp,
+            color = Color.Gray
+        )
 
         if (showForm) {
             Card(

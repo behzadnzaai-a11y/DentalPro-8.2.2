@@ -2375,6 +2375,8 @@ fun ChequeTransferDialog(
     val personalTargets = viewModel.personalSubAccounts.collectAsStateWithLifecycle().value
         .filter { !it.isDeleted }
         .distinctBy { "${it.category.trim()}|${it.parentName.trim()}|${it.name.trim()}" }
+    val parties = viewModel.partyAccounts.collectAsStateWithLifecycle().value.filter { !it.isDeleted }
+    val expensePayments = viewModel.allExpensePayments.collectAsStateWithLifecycle().value.filter { !it.isDeleted }
 
     fun t(fa: String, en: String) = if (isPersian) fa else en
 
@@ -2460,8 +2462,43 @@ fun ChequeTransferDialog(
                 }
                 if (viewModel.canTransferCheque(cheque))
                 LazyColumn(modifier = Modifier.heightIn(max = 320.dp), verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                    item { Text(t("هزینه‌ها / طرف حساب‌ها (هزینه مطب)", "Expenses / payable parties"), fontWeight = FontWeight.Bold, fontSize = 12.sp) }
-                    items(activeExpenses, key = { "e${it.id}" }) { expense ->
+                    // ظرف‌های حساب (طرف‌حساب‌های چندظرفیِ هزینه‌های مطب) — مسیر اصلیِ انتقال:
+                    // چکِ منتقل‌شده یک سندِ پرداختیِ چکی در دفتر همان ظرف می‌شود (transferPartyPaymentId).
+                    if (parties.isNotEmpty()) {
+                        item { Text(t("ظرف‌های حساب (هزینه‌های مطب)", "Party accounts (clinic expenses)"), fontWeight = FontWeight.Bold, fontSize = 12.sp) }
+                        var lastSectionKey = ""
+                        parties.sortedWith(compareBy({ it.section }, { it.name })).forEach { party ->
+                            if (party.section != lastSectionKey) {
+                                lastSectionKey = party.section
+                                item(key = { "sec${lastSectionKey}" }) {
+                                    Text(
+                                        text = PartySection.fromKey(party.section).title(isPersian),
+                                        fontSize = 10.sp,
+                                        color = Color.Gray,
+                                        fontWeight = FontWeight.SemiBold,
+                                        modifier = Modifier.padding(top = 2.dp)
+                                    )
+                                }
+                            }
+                            val ledger = partyLedgerOf(party, activeExpenses, expensePayments)
+                            val dueLabel = when {
+                                ledger.remaining > 0L -> "${t("مانده:", "Due:")} ${formatAmount(ledger.debtAmount)}"
+                                ledger.isPartyDebtor -> "${t("بستانکار:", "Credit:")} ${formatAmount(ledger.partyDebtAmount)}"
+                                else -> t("تسویه", "Settled")
+                            }
+                            item(key = { "p${party.syncId}" }) {
+                                TextButton(onClick = { viewModel.transferChequeToParty(cheque, party); onDismiss() }, modifier = Modifier.fillMaxWidth()) {
+                                    Text("${party.displayLabel} — $dueLabel $currency", maxLines = 1)
+                                }
+                            }
+                        }
+                    }
+                    item { Text(t("فاکتورهای بدون ظرف (هزینه‌های قدیمی)", "Legacy invoices without party"), fontWeight = FontWeight.Bold, fontSize = 12.sp) }
+                    val legacyExpenses = activeExpenses.filter { it.partyAccountId == null }
+                    if (legacyExpenses.isEmpty()) {
+                        item { Text(t("همهٔ فاکتورها به ظرف‌ها پیوند خورده‌اند", "All invoices are linked to parties"), fontSize = 10.sp, color = Color.Gray) }
+                    }
+                    items(legacyExpenses, key = { "e${it.id}" }) { expense ->
                         TextButton(onClick = { viewModel.transferChequeToExpense(cheque, expense.subAccountName, expense.category, expense.id); onDismiss() }, modifier = Modifier.fillMaxWidth()) {
                             Text("${expense.subAccountName.ifBlank { expense.category }} — ${formatAmount(expense.amount)} $currency", maxLines = 1)
                         }

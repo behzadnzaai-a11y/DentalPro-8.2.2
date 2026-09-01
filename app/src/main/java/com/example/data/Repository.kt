@@ -39,6 +39,9 @@ class DentalRepository(val database: AppDatabase) {
     private suspend fun clinicExpenseSyncIdOf(clinicExpenseId: Long?): String =
         clinicExpenseId?.let { database.clinicExpenseDao().getExpenseById(it)?.syncId } ?: ""
 
+    private suspend fun partyAccountSyncIdOf(partyAccountId: Long?): String =
+        partyAccountId?.let { database.partyAccountDao().getById(it)?.syncId } ?: ""
+
     // Patients
     val allPatients: Flow<List<Patient>> = database.patientDao().getAllPatients()
     val allArchivedPatients: Flow<List<Patient>> = database.patientDao().getAllArchivedPatients()
@@ -270,13 +273,29 @@ class DentalRepository(val database: AppDatabase) {
     suspend fun deleteMaintenance(maintenance: EquipmentMaintenance) = 
         database.equipmentMaintenanceDao().deleteMaintenance(maintenance).also { enqueueSyncOp("equipment_maintenance", maintenance.syncId, "DELETE") }
 
-    // Clinic Expenses
+    // Clinic Expenses — در مدل ظرف‌حساب، هر رکورد یک «فاکتور» (بدهی ما) است.
     val allExpenses: Flow<List<ClinicExpense>> = database.clinicExpenseDao().getAllExpenses()
+
+    /** تولید شمارهٔ فاکتورِ پشت‌سرهمِ per-party (مثل LAB-A-0001) و به‌روزکردن شمارندهٔ ظرف. */
+    private suspend fun assignInvoiceNumber(expense: ClinicExpense): ClinicExpense {
+        val partyId = expense.partyAccountId ?: return expense
+        val party = database.partyAccountDao().getById(partyId) ?: return expense
+        val seq = party.invoiceSeq + 1
+        database.partyAccountDao().insertPartyAccount(party.copy(invoiceSeq = seq, updatedAt = System.currentTimeMillis()))
+        enqueueSyncOp("party_accounts", party.syncId, "UPSERT")
+        val code = party.code.ifBlank { party.section }
+        return expense.copy(
+            invoiceNumber = if (expense.invoiceNumber.isBlank()) "$code-${seq.toString().padStart(4, '0')}" else expense.invoiceNumber
+        )
+    }
+
     suspend fun insertExpense(expense: ClinicExpense): Long {
-        val enriched = expense.copy(
-            labOrderSyncId = labOrderSyncIdOf(expense.labOrderId),
-            vendorSyncId = vendorSyncIdOf(expense.vendorId),
-            maintenanceSyncId = maintenanceSyncIdOf(expense.maintenanceId)
+        val numbered = assignInvoiceNumber(expense)
+        val enriched = numbered.copy(
+            labOrderSyncId = labOrderSyncIdOf(numbered.labOrderId),
+            vendorSyncId = vendorSyncIdOf(numbered.vendorId),
+            maintenanceSyncId = maintenanceSyncIdOf(numbered.maintenanceId),
+            partyAccountSyncId = partyAccountSyncIdOf(numbered.partyAccountId)
         )
         return database.clinicExpenseDao().insertExpense(enriched).also { enqueueSyncOp("clinic_expenses", enriched.syncId, "UPSERT") }
     }
@@ -284,7 +303,8 @@ class DentalRepository(val database: AppDatabase) {
         val enriched = expense.copy(
             labOrderSyncId = labOrderSyncIdOf(expense.labOrderId),
             vendorSyncId = vendorSyncIdOf(expense.vendorId),
-            maintenanceSyncId = maintenanceSyncIdOf(expense.maintenanceId)
+            maintenanceSyncId = maintenanceSyncIdOf(expense.maintenanceId),
+            partyAccountSyncId = partyAccountSyncIdOf(expense.partyAccountId)
         )
         database.clinicExpenseDao().updateExpense(enriched).also { enqueueSyncOp("clinic_expenses", enriched.syncId, "UPSERT") }
     }
@@ -316,9 +336,17 @@ class DentalRepository(val database: AppDatabase) {
             newBankId = payment.bankAccountId,
             newDelta = expensePaymentBankDelta(payment),
         )
-        val enriched = payment.copy(
-            clinicExpenseSyncId = clinicExpenseSyncIdOf(payment.clinicExpenseId),
-            bankAccountSyncId = bankAccountSyncIdOf(payment.bankAccountId)
+        // اگر پرداختِ یک فاکتورِ مشخص بدون partyAccountId ثبت شده (مثلاً از مسیرهای
+        // قدیمی «پرداخت فروشنده» یا «انتقال چک به هزینه»)، خودکار به ظرفِ همان فاکتور
+        // وصل می‌شود تا در دفترِ طرف‌حساب دیده شود و ابری هم درست سینک شود.
+        val effective = if (payment.partyAccountId == null && payment.clinicExpenseId > 0L) {
+            val expPartyId = database.clinicExpenseDao().getExpenseById(payment.clinicExpenseId)?.partyAccountId
+            if (expPartyId != null) payment.copy(partyAccountId = expPartyId) else payment
+        } else payment
+        val enriched = effective.copy(
+            clinicExpenseSyncId = clinicExpenseSyncIdOf(effective.clinicExpenseId),
+            bankAccountSyncId = bankAccountSyncIdOf(effective.bankAccountId),
+            partyAccountSyncId = partyAccountSyncIdOf(effective.partyAccountId)
         )
         val id = database.expensePaymentDao().insertExpensePayment(enriched)
         val previous = database.financialLedgerDao().findBySource(SOURCE_EXPENSE_PAYMENT, id)
@@ -366,6 +394,126 @@ class DentalRepository(val database: AppDatabase) {
         database.financialLedgerDao().deleteBySource(SOURCE_EXPENSE_PAYMENT, current.id)
         if (ledger != null) enqueueSyncOp("financial_ledger", ledger.syncId, "DELETE")
         enqueueSyncOp("expense_payments", current.syncId, "DELETE")
+    }
+
+    // ======================================================================
+    //  ظرف‌های حساب (Party Accounts) — طرف‌حساب‌های چندظرفی هزینه‌های مطب
+    // ======================================================================
+    val allPartyAccounts: Flow<List<PartyAccount>> = database.partyAccountDao().getAllPartyAccounts()
+
+    suspend fun getPartyByIdOnce(id: Long): PartyAccount? =
+        database.partyAccountDao().getById(id)
+
+    suspend fun insertPartyAccount(account: PartyAccount): Long =
+        database.partyAccountDao().insertPartyAccount(account).also { enqueueSyncOp("party_accounts", account.syncId, "UPSERT") }
+
+    /** حذف نرمِ ظرف — سوابق (فاکتورها/پرداخت‌ها) برای حفظ دفتر، باقی می‌مانند. */
+    suspend fun deletePartyAccount(account: PartyAccount) =
+        database.partyAccountDao().insertPartyAccount(
+            account.copy(isDeleted = true, updatedAt = System.currentTimeMillis())
+        ).also { enqueueSyncOp("party_accounts", account.syncId, "UPSERT") }
+
+    /**
+     * یافتن یا ساختِ ظرفِ (section, name). کدِ خودکارِ ظرف از ترتیبِ ساخت در همان بخش
+     * ساخته می‌شود: اولی A، دومی B و… (مثل LAB-A، ENG-B، STORE-A).
+     */
+    suspend fun findOrCreateParty(
+        section: PartySection,
+        title: String,
+        name: String
+    ): PartyAccount {
+        val trimmedName = name.trim()
+        val existing = database.partyAccountDao().getAllList().firstOrNull {
+            !it.isDeleted && it.section.trim() == section.key && it.name.trim().equals(trimmedName, ignoreCase = true)
+        }
+        if (existing != null) return existing
+        val letter = ('A'.code + database.partyAccountDao().getBySection(section.key).count { !it.isDeleted }).toChar().toString()
+        val account = PartyAccount(
+            section = section.key,
+            code = "${sectionCodePrefix(section)}$letter",
+            title = title.ifBlank { section.faTitle },
+            name = trimmedName
+        )
+        val id = insertPartyAccount(account)
+        return database.partyAccountDao().getById(id) ?: account.copy(id = id)
+    }
+
+    private fun sectionCodePrefix(section: PartySection): String = when (section) {
+        PartySection.LAB -> "LAB"
+        PartySection.ENGINEERING -> "ENG"
+        PartySection.STORE -> "STORE"
+        PartySection.RUNNING -> "RUN"
+        PartySection.OTHER -> "OTHER"
+    }
+
+    /**
+     * Backfill یک‌باره و idempotent: داده‌های قدیمیِ هزینه‌ها را به ظرف‌های حساب وصل می‌کند.
+     *  - از هر «(بخش، نامِ طرف‌حساب)»ِ موجود یک ظرف می‌سازد (لابراتوارها، فروشندگان،
+     *    تکنسین‌ها، تعمیرات و…).
+     *  - فاکتورهای قدیمی و پرداخت‌هایشان را به همان ظرف پیوند می‌دهد.
+     *  - پرداخت‌های «کلیِ ظرف» با clinicExpenseId=0 به partyAccountId وصل می‌شوند.
+     * امن است که چند بار صدا زده شود؛ رکوردهایی که قبلاً پیوند خورده‌اند دست نمی‌خورند.
+     */
+    suspend fun migrateLegacyExpenseParties() = inTransaction {
+        val parties = database.partyAccountDao().getAllList()
+        fun partyOf(section: PartySection, title: String, name: String): PartyAccount {
+            val n = name.trim()
+            if (n.isBlank()) return parties.firstOrNull { !it.isDeleted && it.section.trim() == section.key && it.name.trim() == "سایر" }
+                ?: findOrCreateParty(section, title, "سایر")
+            return findOrCreateParty(section, title, n)
+        }
+
+        // ۱) فاکتورهای قدیمی (clinic_expenses) — تعیین بخش با inferFrom و پیوند به ظرف.
+        val allExpenses = database.clinicExpenseDao().getAllList()
+        allExpenses.forEach { exp ->
+            if (exp.isDeleted) return@forEach
+            if (exp.partyAccountId != null) return@forEach
+            val group = ExpenseGroup.inferFrom(exp)
+            val section = PartySection.fromExpenseGroup(group)
+            val title = if (group == ExpenseGroup.EQUIPMENT) PartySection.ENGINEERING.faTitle else group.title(true)
+            val party = partyOf(section, title, exp.subAccountName.ifBlank { exp.description }.ifBlank { "سایر" })
+            val numbered = assignInvoiceNumber(exp.copy(partyAccountId = party.id))
+            database.clinicExpenseDao().insertExpense(
+                numbered.copy(
+                    partyAccountSyncId = party.syncId,
+                    expenseGroup = section.key,
+                    updatedAt = System.currentTimeMillis()
+                )
+            )
+            enqueueSyncOp("clinic_expenses", numbered.syncId, "UPSERT")
+        }
+
+        // ۲) ظرف‌های واقعیِ بدونِ فاکتور (لابراتوارها / فروشندگان / تکنسین‌ها).
+        database.labOrderDao().getAllList().filter { !it.isDeleted && it.labName.isNotBlank() }
+            .forEach { findOrCreateParty(PartySection.LAB, PartySection.LAB.faTitle, it.labName) }
+        database.vendorDao().getAllList().filter { !it.isDeleted && it.name.isNotBlank() }
+            .forEach { findOrCreateParty(PartySection.STORE, PartySection.STORE.faTitle, it.name) }
+        database.equipmentMaintenanceDao().getAllList().filter { !it.isDeleted }
+            .forEach { m ->
+                val tech = m.technicianName?.takeIf { it.isNotBlank() }
+                findOrCreateParty(PartySection.ENGINEERING, PartySection.ENGINEERING.faTitle, tech ?: "تکنسین تجهیزات")
+            }
+
+        // ۳) پرداخت‌های قدیمی — پیوند به ظرفِ فاکتورِ خودشان (یا مستقل اگر کلی باشند).
+        val partyById = database.partyAccountDao().getAllList().associateBy { it.id }
+        database.expensePaymentDao().getAllList().forEach { pay ->
+            if (pay.isDeleted) return@forEach
+            if (pay.partyAccountId != null) return@forEach
+            val targetPartyId = pay.clinicExpenseId
+                .takeIf { it > 0L }
+                ?.let { database.clinicExpenseDao().getExpenseById(it) }
+                ?.partyAccountId
+            if (targetPartyId == null) return@forEach
+            val party = partyById[targetPartyId] ?: return@forEach
+            database.expensePaymentDao().insertExpensePayment(
+                pay.copy(
+                    partyAccountId = party.id,
+                    partyAccountSyncId = party.syncId,
+                    updatedAt = System.currentTimeMillis()
+                )
+            )
+            enqueueSyncOp("expense_payments", pay.syncId, "UPSERT")
+        }
     }
 
     // Personal transactions

@@ -36,41 +36,37 @@ import com.example.ui.DentalViewModel
 // هزینه‌های مطب — چیدمان: (۱) فرمِ «ثبت هزینه جاری مطب»، (۲) «پرداخت هزینه‌ها» زیرِ
 // فرم و بالای صفحه؛ انتخابِ طرف‌حساب از بینِ طرف‌حساب‌های موجود و پرداختِ کل/جزئی.
 /**
- * هابِ «هزینه‌های مطب»: چهار کارتِ اصلی + کارتِ باریکِ «سایر». هر کارت جمع/تعدادِ
- * هزینه‌های همان گروه را نشان می‌دهد و با لمس، صفحهٔ drill-down همان گروه باز می‌شود.
- * صفحهٔ هر گروه، تراکنش‌ها/فاکتورها را به‌تفکیکِ زیرشاخه (طرف‌حساب) نمایش می‌دهد و
- * از همان‌جا هم می‌توان هزینه/فاکتور ثبت کرد.
+ * هابِ «هزینه‌های مطب» در مدل ظرف‌حساب (طرف‌حساب چندظرفی):
+ * هر بخش (لابراتوار / فنی مهندسی و تعمیرات / فروشگاه مواد دندانپزشکی / جاری / سایر)
+ * چند «ظرف حساب» دارد — مثل «لابراتوار آ»، «فنی مهندسی ب»، «فروشگاه آ». فاکتور،
+ * پرداخت و چکِ هر ظرف کاملاً جدا ثبت و محاسبه می‌شود و مانده فقط از توالیِ
+ * فاکتورها منهای پرداختی‌ها به‌دست می‌آید (بدون ذخیرهٔ وضعیت تسویه).
  */
 @Composable
 fun ExpensesScreen(viewModel: DentalViewModel) {
-    var selectedGroupKey by rememberSaveable { mutableStateOf<String?>(null) }
-    val group = selectedGroupKey?.let { ExpenseGroup.fromKey(it) }
-    if (group == null) {
-        ExpensesHubScreen(viewModel, onOpenGroup = { selectedGroupKey = it.key })
+    var selectedSectionKey by rememberSaveable { mutableStateOf<String?>(null) }
+    val section = selectedSectionKey?.let { PartySection.fromKey(it) }
+    if (section == null) {
+        ExpensesHubScreen(viewModel, onOpenSection = { selectedSectionKey = it.key })
     } else {
-        ExpenseGroupDetailScreen(viewModel, group, onBack = { selectedGroupKey = null })
+        PartySectionDetailScreen(viewModel, section, onBack = { selectedSectionKey = null })
     }
 }
 
 @Composable
 private fun ExpensesHubScreen(
     viewModel: DentalViewModel,
-    onOpenGroup: (ExpenseGroup) -> Unit
+    onOpenSection: (PartySection) -> Unit
 ) {
     val isPersian = viewModel.isPersian.collectAsStateWithLifecycle().value
+    val parties by viewModel.partyAccounts.collectAsStateWithLifecycle()
     val expenses by viewModel.clinicExpenses.collectAsStateWithLifecycle()
     val expensePayments by viewModel.allExpensePayments.collectAsStateWithLifecycle()
     val currency = viewModel.label("currency")
     fun t(fa: String, en: String) = if (isPersian) fa else en
 
-    val active = expenses.filter { !it.isDeleted }
-    // جمع و تعدادِ هر گروه (با inferFrom تا هزینه‌های قدیمیِ بدونِ گروه هم درست دسته شوند).
-    fun groupExpenses(g: ExpenseGroup) = active.filter { ExpenseGroup.inferFrom(it) == g }
-    fun groupTotal(g: ExpenseGroup): Long = groupExpenses(g).sumOf { it.amount }
-    fun groupPaid(g: ExpenseGroup): Long {
-        val ids = groupExpenses(g).map { it.id }.toSet()
-        return expensePayments.filter { !it.isDeleted && it.clinicExpenseId in ids }.sumOf { it.amount }
-    }
+    val activeExpenses = expenses.filter { !it.isDeleted }
+    val activePayments = expensePayments.filter { !it.isDeleted }
 
     Column(
         modifier = Modifier
@@ -86,42 +82,42 @@ private fun ExpensesHubScreen(
         )
         Text(
             text = t(
-                "یک بخش را انتخاب کنید تا تراکنش‌ها و فاکتورهای آن به تفکیک طرف‌حساب نمایش داده شود و بتوانید هزینه ثبت کنید.",
-                "Pick a section to see its transactions and invoices by counterparty and register expenses."
+                "یک بخش را انتخاب کنید. هر بخش چند «ظرف حساب» (طرف‌حساب) دارد — مثل «لابراتوار آ»، «فنی مهندسی ب»، «فروشگاه آ». فاکتور، پرداخت و چک هر ظرف کاملاً جدا ثبت و محاسبه می‌شود.",
+                "Pick a section. Each section holds multiple party accounts (e.g. Lab A, Eng B, Store A). Invoices, payments and cheques are tracked per party."
             ),
             fontSize = 11.sp,
             color = Color.Gray
         )
 
-        // چهار کارتِ اصلی — دو ردیفِ دوتایی
-        ExpenseGroup.primary.chunked(2).forEach { rowGroups ->
+        // چهار کارتِ اصلیِ بخش‌ها — دو ردیفِ دوتایی
+        PartySection.primary.chunked(2).forEach { rowSections ->
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.spacedBy(12.dp)
             ) {
-                rowGroups.forEach { g ->
-                    ExpenseGroupCard(
-                        group = g,
-                        total = groupTotal(g),
-                        paid = groupPaid(g),
-                        count = groupExpenses(g).size,
+                rowSections.forEach { s ->
+                    PartySectionCard(
+                        section = s,
+                        ledger = partySectionLedger(s, parties, activeExpenses, activePayments),
+                        partyCount = parties.count { it.section.trim() == s.key },
                         currency = currency,
                         isPersian = isPersian,
                         modifier = Modifier.weight(1f),
-                        onClick = { onOpenGroup(g) }
+                        onClick = { onOpenSection(s) }
                     )
                 }
-                if (rowGroups.size == 1) Spacer(Modifier.weight(1f))
+                if (rowSections.size == 1) Spacer(Modifier.weight(1f))
             }
         }
 
-        // کارتِ باریکِ «سایر هزینه‌ها» + امکان افزودن سرفصل/هزینهٔ جدید
+        // کارتِ باریکِ «سایر»
+        val otherLedger = partySectionLedger(PartySection.OTHER, parties, activeExpenses, activePayments)
         Surface(
             modifier = Modifier.fillMaxWidth(),
             shape = RoundedCornerShape(14.dp),
             color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
             border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.4f)),
-            onClick = { onOpenGroup(ExpenseGroup.OTHER) }
+            onClick = { onOpenSection(PartySection.OTHER) }
         ) {
             Row(
                 modifier = Modifier.padding(horizontal = 14.dp, vertical = 12.dp),
@@ -131,7 +127,7 @@ private fun ExpensesHubScreen(
                 Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     Icon(Icons.Default.AddCircleOutline, contentDescription = null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(20.dp))
                     Column {
-                        Text(ExpenseGroup.OTHER.title(isPersian), fontWeight = FontWeight.Bold, fontSize = 12.sp)
+                        Text(PartySection.OTHER.title(isPersian), fontWeight = FontWeight.Bold, fontSize = 12.sp)
                         Text(
                             t("افزودن سرفصل و ثبت سایر هزینه‌های مطب", "Add heading & register other expenses"),
                             fontSize = 9.5.sp, color = Color.Gray
@@ -139,7 +135,7 @@ private fun ExpensesHubScreen(
                     }
                 }
                 Text(
-                    "${formatAmount(groupTotal(ExpenseGroup.OTHER))} $currency",
+                    "${formatAmount(otherLedger.orders)} $currency",
                     fontWeight = FontWeight.Bold, fontSize = 11.sp, color = MaterialTheme.colorScheme.error
                 )
             }
@@ -149,24 +145,23 @@ private fun ExpensesHubScreen(
 }
 
 @Composable
-private fun ExpenseGroupCard(
-    group: ExpenseGroup,
-    total: Long,
-    paid: Long,
-    count: Int,
+private fun PartySectionCard(
+    section: PartySection,
+    ledger: PartyLedger,
+    partyCount: Int,
     currency: String,
     isPersian: Boolean,
     modifier: Modifier = Modifier,
     onClick: () -> Unit
 ) {
     fun t(fa: String, en: String) = if (isPersian) fa else en
-    val remaining = total - paid
-    val icon = when (group) {
-        ExpenseGroup.LAB -> Icons.Default.Science
-        ExpenseGroup.CONSUMABLES -> Icons.Default.MedicalServices
-        ExpenseGroup.EQUIPMENT -> Icons.Default.Handyman
-        ExpenseGroup.RUNNING -> Icons.Default.Receipt
-        ExpenseGroup.OTHER -> Icons.Default.MoreHoriz
+    val remaining = ledger.remaining
+    val icon = when (section) {
+        PartySection.LAB -> Icons.Default.Science
+        PartySection.ENGINEERING -> Icons.Default.Handyman
+        PartySection.STORE -> Icons.Default.MedicalServices
+        PartySection.RUNNING -> Icons.Default.Receipt
+        PartySection.OTHER -> Icons.Default.MoreHoriz
     }
     Card(
         modifier = modifier.height(132.dp).clickable { onClick() },
@@ -185,76 +180,50 @@ private fun ExpenseGroupCard(
                     contentAlignment = Alignment.Center
                 ) { Icon(icon, contentDescription = null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(20.dp)) }
                 Text(
-                    group.title(isPersian),
+                    section.title(isPersian),
                     fontWeight = FontWeight.Bold, fontSize = 12.sp,
                     maxLines = 2, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f)
                 )
             }
             Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                Text("${formatAmount(total)} $currency", fontWeight = FontWeight.ExtraBold, fontSize = 13.sp, color = MaterialTheme.colorScheme.error, maxLines = 1)
+                Text("${formatAmount(ledger.orders)} $currency", fontWeight = FontWeight.ExtraBold, fontSize = 13.sp, color = MaterialTheme.colorScheme.error, maxLines = 1)
                 Text(
-                    text = if (remaining > 0L) "${t("مانده:", "Due:")} ${formatAmount(remaining)} $currency"
-                    else t("تسویه ✓", "Settled ✓"),
+                    text = when {
+                        remaining > 0L -> "${t("مانده:", "Due:")} ${formatAmount(remaining)} $currency"
+                        remaining < 0L -> "${t("بستانکار:", "Credit:")} ${formatAmount(-remaining)} $currency"
+                        else -> "${t("مانده:", "Due:")} 0 $currency"
+                    },
                     fontSize = 9.5.sp,
-                    color = if (remaining > 0L) Color(0xFFC2410C) else Color(0xFF2E7D32)
+                    color = when {
+                        remaining > 0L -> Color(0xFFC2410C)
+                        remaining < 0L -> Color(0xFF6A1B9A)
+                        else -> Color(0xFF2E7D32)
+                    }
                 )
-                Text("${t("تعداد:", "Items:")} ${if (isPersian) com.example.util.PersianNumberFormatter.toPersianDigits(count.toString()) else count}", fontSize = 9.sp, color = Color.Gray)
+                Text("${t("ظرف‌ها:", "Parties:")} ${if (isPersian) com.example.util.PersianNumberFormatter.toPersianDigits(partyCount.toString()) else partyCount}", fontSize = 9.sp, color = Color.Gray)
             }
         }
     }
 }
 
 @Composable
-private fun ExpenseGroupDetailScreen(
+private fun PartySectionDetailScreen(
     viewModel: DentalViewModel,
-    expenseGroup: ExpenseGroup,
+    section: PartySection,
     onBack: () -> Unit
 ) {
     val isPersian = viewModel.isPersian.collectAsStateWithLifecycle().value
+    val parties by viewModel.partyAccounts.collectAsStateWithLifecycle()
     val allExpensesRaw by viewModel.clinicExpenses.collectAsStateWithLifecycle()
-    // فقط هزینه‌های همین گروه (با inferFrom تا داده‌های قدیمی هم دیده شوند).
-    val expenses = allExpensesRaw.filter { ExpenseGroup.inferFrom(it) == expenseGroup }
     val expensePayments by viewModel.allExpensePayments.collectAsStateWithLifecycle()
-    val bankAccounts by viewModel.bankAccounts.collectAsStateWithLifecycle()
-    val allPayments by viewModel.allPayments.collectAsStateWithLifecycle()
     val currency = viewModel.label("currency")
-
     fun t(fa: String, en: String) = if (isPersian) fa else en
 
-    // فرم ثبت هزینه جاری
-    var showAddForm by remember { mutableStateOf(false) }
-    var category by remember { mutableStateOf("") }
-    var amountStr by remember { mutableStateOf("") }
-    var desc by remember { mutableStateOf("") }
-    // نام طرف‌حساب جدا از عنوان ثبت می‌شود تا در همه‌جا «عنوان (نام)» ساخته شود.
-    var partyName by remember { mutableStateOf("") }
-    var method by remember { mutableStateOf("CARD_TRANSFER") }
+    val sectionParties = parties.filter { it.section.trim() == section.key }.sortedBy { it.name }
 
-    // پرداخت هزینه‌ها
-    val activeExpenses = expenses.filter { !it.isDeleted }.sortedByDescending { it.date }
-    // طرف‌حساب‌ها با عنوانِ ترکیبی «عنوان (نام)» گروه‌بندی می‌شوند تا دو
-    // لابراتوارِ مختلف زیر یک عنوانِ «لابراتوار» با هم قاطی نشوند.
-    val counterparties = remember(activeExpenses) {
-        activeExpenses.map { com.example.data.partyLabelOf(it) }
-            .filter { it.isNotBlank() }.distinct().sorted()
-    }
-    var selectedCounterparty by remember { mutableStateOf<String?>(null) }
-    var expenseToPay by remember { mutableStateOf<ClinicExpense?>(null) }
-    // تغییر وضعیت چک‌های هزینه — با دیالوگ تأیید (نه با یک کلیکِ بی‌بازگشت)
-    var expenseChequeToClear by remember { mutableStateOf<com.example.data.Payment?>(null) }
-    var expenseChequeToBounce by remember { mutableStateOf<com.example.data.Payment?>(null) }
-    var expenseToEdit by remember { mutableStateOf<ClinicExpense?>(null) }
-    var expenseToDelete by remember { mutableStateOf<ClinicExpense?>(null) }
+    var showAddParty by remember { mutableStateOf(false) }
+    var selectedParty by remember { mutableStateOf<PartyAccount?>(null) }
 
-    // مانده‌ی هر هزینه = مبلغ هزینه − جمع پرداخت‌های ثبت‌شده برای آن.
-    // علامت‌دار است: منفی یعنی بیش از مبلغ هزینه پرداخت شده (بستانکاری).
-    fun remainingOf(expense: ClinicExpense): Long {
-        val paid = expensePayments.filter { !it.isDeleted && it.clinicExpenseId == expense.id }.sumOf { it.amount }
-        return expense.amount - paid
-    }
-
-    // رفع باگ: این صفحه یک Column ساده بود و با زیاد شدن محتوا اسکرول نمی‌شد؛
-    // بخش‌های پایین صفحه اصلاً در دسترس نبودند. حالا کل صفحه verticalScroll دارد.
     Column(
         modifier = Modifier
             .fillMaxSize()
@@ -273,7 +242,7 @@ private fun ExpenseGroupDetailScreen(
                 }
                 Spacer(Modifier.width(2.dp))
                 Text(
-                    text = expenseGroup.title(isPersian),
+                    text = section.title(isPersian),
                     style = MaterialTheme.typography.titleMedium,
                     fontWeight = FontWeight.Bold,
                     maxLines = 2,
@@ -281,504 +250,651 @@ private fun ExpenseGroupDetailScreen(
                 )
             }
             Button(
-                onClick = { showAddForm = !showAddForm },
+                onClick = { showAddParty = true },
                 contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp)
             ) {
-                Icon(if (showAddForm) Icons.Default.Close else Icons.Default.Add, contentDescription = null, modifier = Modifier.size(16.dp))
+                Icon(Icons.Default.PersonAdd, contentDescription = null, modifier = Modifier.size(16.dp))
                 Spacer(Modifier.width(4.dp))
-                Text(if (showAddForm) t("بستن", "Close") else t("ثبت هزینه", "Add"), fontWeight = FontWeight.Bold, fontSize = 11.sp)
+                Text(t("افزودن ظرف", "Add account"), fontWeight = FontWeight.Bold, fontSize = 11.sp)
             }
         }
 
-        if (showAddForm) {
-            Card(
-                modifier = Modifier.fillMaxWidth(),
-                shape = RoundedCornerShape(14.dp),
-                border = BorderStroke(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.4f))
-            ) {
-                Column(
-                    modifier = Modifier.padding(12.dp),
-                    verticalArrangement = Arrangement.spacedBy(8.dp)
-                ) {
-                    Text(t("ثبت هزینه جاری مطب", "New Clinic Expense"), fontWeight = FontWeight.Bold, fontSize = 13.sp, color = MaterialTheme.colorScheme.primary)
-                    OutlinedTextField(
-                        value = category, onValueChange = { category = it },
-                        label = { Text(t("عنوان طرف‌حساب (مثلاً لابراتوار، فروشگاه، فنی مهندسی)", "Party title (e.g. Lab, Store)")) },
-                        modifier = Modifier.fillMaxWidth(), singleLine = true
-                    )
-                    OutlinedTextField(
-                        value = partyName, onValueChange = { partyName = it },
-                        label = { Text(t("نام طرف‌حساب (مثلاً نیازی، حاتمی، وحیدی)", "Party name (e.g. Niazi)")) },
-                        modifier = Modifier.fillMaxWidth(), singleLine = true
-                    )
-                    if (category.isNotBlank() || partyName.isNotBlank()) {
-                        Text(
-                            text = t(
-                                "در گزارش‌ها و صورتحساب چنین نوشته می‌شود: ${com.example.data.partyDisplayLabel(category, partyName)}",
-                                "Shown everywhere as: ${com.example.data.partyDisplayLabel(category, partyName)}"
-                            ),
-                            fontSize = 10.sp,
-                            color = MaterialTheme.colorScheme.primary,
-                            fontWeight = FontWeight.SemiBold
-                        )
-                    }
-                    OutlinedTextField(
-                        value = amountStr, onValueChange = { amountStr = it.filter(Char::isDigit) },
-                        label = { Text("${t("مبلغ", "Amount")} ($currency)") },
-                        modifier = Modifier.fillMaxWidth(), singleLine = true
-                    )
-                    RealTimeAmountHelper(amountStr, isPersian)
-                    OutlinedTextField(
-                        value = desc, onValueChange = { desc = it },
-                        label = { Text(t("توضیحات", "Description")) },
-                        modifier = Modifier.fillMaxWidth(), singleLine = true
-                    )
-                    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                        listOf(
-                            "CASH" to t("نقدی", "Cash"),
-                            "CARD_TRANSFER" to t("کارت به کارت", "Card Transfer"),
-                            "POS" to t("پوز", "POS"),
-                            "CHEQUE" to t("چک", "Cheque")
-                        ).forEach { (key, labelTxt) ->
-                            FilterChip(
-                                selected = method == key,
-                                onClick = { method = key },
-                                label = { Text(labelTxt, fontSize = 10.sp) },
-                                modifier = Modifier.weight(1f)
-                            )
-                        }
-                    }
-                    Button(
-                        onClick = {
-                            val amount = amountStr.trim().toLongOrNull() ?: 0L
-                            if (category.isNotBlank() && amount > 0) {
-                                viewModel.addExpense(
-                                    category = category.trim(),
-                                    amount = amount,
-                                    desc = desc.trim(),
-                                    paymentMethod = method,
-                                    subAccountName = partyName.trim(),
-                                    expenseGroup = expenseGroup.key
-                                )
-                                category = ""; amountStr = ""; desc = ""; partyName = ""
-                                showAddForm = false
-                            }
-                        },
-                        modifier = Modifier.fillMaxWidth(),
-                        enabled = category.isNotBlank() && (amountStr.trim().toLongOrNull() ?: 0L) > 0
-                    ) {
-                        Icon(Icons.Default.CheckCircle, contentDescription = null, modifier = Modifier.size(16.dp))
-                        Spacer(Modifier.width(4.dp))
-                        Text(t("ثبت هزینه", "Save Expense"), fontWeight = FontWeight.Bold)
-                    }
-                }
-            }
-        }
-
-        // ——— «پرداخت هزینه ها» — بالای صفحه، زیر فرم ثبت (درخواست کاربر) ———
-        Card(
-            modifier = Modifier.fillMaxWidth(),
-            shape = RoundedCornerShape(14.dp),
-            border = BorderStroke(1.dp, Color(0xFF2E7D32).copy(alpha = 0.45f))
-        ) {
-            Column(
-                modifier = Modifier.padding(12.dp),
-                verticalArrangement = Arrangement.spacedBy(8.dp)
-            ) {
-                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                    Icon(Icons.Default.Payment, contentDescription = null, tint = Color(0xFF2E7D32), modifier = Modifier.size(18.dp))
-                    Text(t("پرداخت هزینه ها", "Pay Expenses"), fontWeight = FontWeight.Bold, fontSize = 13.sp, color = Color(0xFF2E7D32))
-                }
-                Text(
-                    text = t(
-                        "طرف‌حساب را از بین طرف‌حساب‌های هزینه‌های ثبت‌شده انتخاب کنید:",
-                        "Pick the counterparty among existing expense counterparties:"
-                    ),
-                    fontSize = 10.5.sp,
-                    color = Color.Gray
-                )
-                if (counterparties.isEmpty()) {
-                    Text(
-                        text = t("هنوز هزینه‌ای ثبت نشده است.", "No expenses registered yet."),
-                        fontSize = 10.5.sp,
-                        color = Color.Gray
-                    )
-                } else {
-                    Row(
-                        modifier = Modifier.fillMaxWidth().horizontalScrollCompat(),
-                        horizontalArrangement = Arrangement.spacedBy(6.dp)
-                    ) {
-                        counterparties.forEach { cp ->
-                            FilterChip(
-                                selected = selectedCounterparty == cp,
-                                onClick = { selectedCounterparty = if (selectedCounterparty == cp) null else cp },
-                                label = { Text(cp, fontSize = 10.sp, maxLines = 1) }
-                            )
-                        }
-                    }
-                }
-                selectedCounterparty?.let { cp ->
-                    val partyExpenses = activeExpenses.filter { com.example.data.partyLabelOf(it) == cp }
-                    val partyExpenseIds = partyExpenses.map { it.id }.toSet()
-                    val partyPayments = expensePayments.filter {
-                        !it.isDeleted && it.clinicExpenseId in partyExpenseIds
-                    }
-
-                    // سرصفحهٔ صورتحساب — نام طرف‌حساب کنار عنوان، دقیقاً مثل
-                    // «صورتحساب (لابراتوار نیازی)». مانده هم علامت‌دار است تا
-                    // اضافه‌پرداخت به‌صورت «بستانکار» دیده شود.
-                    val partyTotalDebt = partyExpenses.sumOf { it.amount }
-                    val partyTotalPaid = partyPayments.sumOf { it.amount }
-                    val partyLedger = com.example.data.PartyLedger(partyTotalDebt, partyTotalPaid)
-                    val partyBalanceColor = when {
-                        partyLedger.isPartyDebtor -> Color(0xFF6A1B9A)
-                        partyLedger.remaining > 0L -> Color(0xFFC2410C)
-                        else -> Color(0xFF2E7D32)
-                    }
-                    Surface(
-                        modifier = Modifier.fillMaxWidth(),
-                        shape = RoundedCornerShape(10.dp),
-                        color = partyBalanceColor.copy(alpha = 0.10f),
-                        border = BorderStroke(1.dp, partyBalanceColor.copy(alpha = 0.35f))
-                    ) {
-                        Column(modifier = Modifier.padding(10.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                            Text(
-                                text = if (isPersian) "صورتحساب ($cp)" else "Statement ($cp)",
-                                fontSize = 13.sp,
-                                fontWeight = FontWeight.ExtraBold
-                            )
-                            Text(
-                                text = "${t("جمع فاکتورها:", "Invoices:")} ${formatAmount(partyTotalDebt)} $currency" +
-                                    "  |  ${t("پرداختی:", "Paid:")} ${formatAmount(partyTotalPaid)} $currency",
-                                fontSize = 10.sp,
-                                color = Color.Gray
-                            )
-                            Text(
-                                text = when {
-                                    partyLedger.isPartyDebtor ->
-                                        if (isPersian) "$cp به ما بدهکار است: ${formatAmount(partyLedger.partyDebtAmount)} $currency"
-                                        else "$cp owes us: ${formatAmount(partyLedger.partyDebtAmount)} $currency"
-                                    partyLedger.remaining > 0L ->
-                                        "${t("مانده بدهی:", "Outstanding:")} ${formatAmount(partyLedger.debtAmount)} $currency"
-                                    else -> t("حساب تسویه است ✓", "Settled ✓")
-                                },
-                                fontSize = 12.sp,
-                                fontWeight = FontWeight.Bold,
-                                color = partyBalanceColor
-                            )
-                            if (partyLedger.isPartyDebtor) {
-                                Text(
-                                    text = t(
-                                        "پرداختی بیش از مبلغ فاکتورهاست؛ این مبلغ را از این طرف‌حساب طلب داریم.",
-                                        "Payments exceed the invoiced amount; this sum is receivable from the party."
-                                    ),
-                                    fontSize = 9.5.sp,
-                                    color = Color.Gray
-                                )
-                            }
-                        }
-                    }
-
-                    // ارسال صورت‌حساب و فاکتور این طرف‌حساب — با همان مولد و ابعاد
-                    // استاندارد اسناد برنامه (VendorLedger / LabInvoice).
-                    ExpensePartySendActionsRow(
-                        partyName = cp,
-                        expenses = partyExpenses,
-                        payments = partyPayments,
-                        viewModel = viewModel,
-                        isPersian = isPersian
-                    )
-
-                    val rows = partyExpenses.take(10)
-                    if (rows.isEmpty()) {
-                        Text(t("موردی برای این طرف‌حساب نیست.", "No items for this counterparty."), fontSize = 10.5.sp, color = Color.Gray)
-                    }
-                    rows.forEach { expense ->
-                        val remaining = remainingOf(expense)
-                        Surface(
-                            modifier = Modifier.fillMaxWidth(),
-                            shape = RoundedCornerShape(10.dp),
-                            color = when {
-                                remaining < 0L -> Color(0xFF6A1B9A).copy(alpha = 0.10f)
-                                remaining == 0L -> Color(0xFF2E7D32).copy(alpha = 0.08f)
-                                else -> MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f)
-                            },
-                            onClick = { expenseToPay = expense }
-                        ) {
-                            Row(
-                                modifier = Modifier.padding(10.dp),
-                                horizontalArrangement = Arrangement.SpaceBetween,
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                Column(modifier = Modifier.weight(1f)) {
-                                    Text(
-                                        text = expense.description.ifBlank { t("بدون توضیح", "No description") },
-                                        fontSize = 11.sp,
-                                        fontWeight = FontWeight.SemiBold,
-                                        maxLines = 1,
-                                        overflow = TextOverflow.Ellipsis
-                                    )
-                                    Text(viewModel.formatDate(expense.date), fontSize = 9.sp, color = Color.Gray)
-                                }
-                                Column(horizontalAlignment = Alignment.End) {
-                                    Text("${formatAmount(expense.amount)} $currency", fontSize = 11.sp, fontWeight = FontWeight.Bold)
-                                    Text(
-                                        text = when {
-                                            remaining < 0L -> "${t("بدهکار به ما", "Owes us")}: ${formatAmount(-remaining)} $currency"
-                                            remaining == 0L -> t("تسویه‌شده ✓", "Settled ✓")
-                                            else -> "${t("مانده", "Remaining")}: ${formatAmount(remaining)} $currency"
-                                        },
-                                        fontSize = 9.sp,
-                                        color = when {
-                                            remaining < 0L -> Color(0xFF6A1B9A)
-                                            remaining == 0L -> Color(0xFF2E7D32)
-                                            else -> Color(0xFFC2410C)
-                                        }
-                                    )
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-        }
-
-        // چک‌هایی که به هزینه وصل‌اند — تغییر وضعیت همین‌جا روی حسابداری هزینه اعمال می‌شود
-        val linkedChequeNumbers = remember(expenses, expensePayments) {
-            (expenses.mapNotNull { it.chequeNumber?.takeIf { n -> n.isNotBlank() } } +
-                expensePayments.mapNotNull { it.chequeNumber?.takeIf { n -> n.isNotBlank() } }).toSet()
-        }
-        val expenseCheques = remember(allPayments, linkedChequeNumbers) {
-            allPayments.filter { !it.isDeleted && it.type == "CHEQUE" && (
-                (!it.chequeNumber.isNullOrBlank() && it.chequeNumber in linkedChequeNumbers) ||
-                    // فقط چکِ انتقال‌یافته «به هزینهٔ مطب» اینجا دیده شود؛ چکی که به شخص/
-                    // حساب اشخاص اندورس شده (transferChildrenExpenseId یا فقط transferTransactionId)
-                    // نباید در هزینه‌های مطب ظاهر شود — رفعِ باگِ ورودِ اشتباهِ چک اشخاص.
-                    (it.chequeStatus == "TRANSFERRED" && it.transferExpensePaymentId != null)
-                )
-            }
-        }
-        if (expenseCheques.isNotEmpty()) {
-            Text(t("چک‌های هزینه‌ها — تغییر وضعیت", "Expense cheques — status"), fontWeight = FontWeight.Bold, fontSize = 13.sp)
-            expenseCheques.take(12).forEach { cheque ->
-                Surface(
-                    modifier = Modifier.fillMaxWidth(),
-                    shape = RoundedCornerShape(10.dp),
-                    color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f)
-                ) {
-                    Column(modifier = Modifier.padding(10.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                        Text(
-                            text = "${cheque.chequeBank.orEmpty().ifBlank { t("چک", "Cheque") }} ${cheque.chequeNumber.orEmpty()} — ${formatAmount(cheque.amount)} $currency",
-                            fontSize = 11.sp,
-                            fontWeight = FontWeight.Bold
-                        )
-                        Text(
-                            text = viewModel.chequeStatusLabel(cheque, isPersian),
-                            fontSize = 10.sp,
-                            color = Color.Gray
-                        )
-                        // تغییر وضعیت با تأیید انجام می‌شود؛ ضمناً چکِ انتقال‌یافته
-                        // را نمی‌شود از اینجا «وصول» کرد — آن چک دیگر در اختیار مطب نیست
-                        // و وصولش فقط از راه لغو انتقال معنا دارد.
-                        Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                            if (cheque.chequeStatus == "PENDING") {
-                                FilterChip(
-                                    selected = false,
-                                    onClick = { expenseChequeToClear = cheque },
-                                    label = { Text(t("وصول", "Clear"), fontSize = 9.sp) }
-                                )
-                            }
-                            if (cheque.chequeStatus != "BOUNCED") {
-                                FilterChip(
-                                    selected = false,
-                                    onClick = { expenseChequeToBounce = cheque },
-                                    label = { Text(t("برگشت", "Bounce"), fontSize = 9.sp) }
-                                )
-                            }
-                            FilterChip(
-                                selected = cheque.chequeStatus == "CLEARED",
-                                enabled = false,
-                                onClick = {},
-                                label = { Text(t("وصول‌شده", "Cleared"), fontSize = 9.sp) }
-                            )
-                        }
-                    }
-                }
-            }
-        }
-
-        // ——— لیست همه‌ی هزینه‌ها ———
         Text(
-            text = t("همه‌ی هزینه‌ها (${activeExpenses.size})", "All Expenses (${activeExpenses.size})"),
-            fontWeight = FontWeight.Bold,
-            fontSize = 13.sp
+            text = t(
+                "ظرف‌های حساب این بخش — با لمس هر ظرف، دفتر آن (فاکتورها، پرداخت‌ها، چک‌ها و مانده) باز می‌شود:",
+                "Party accounts in this section — tap a party to open its ledger:"
+            ),
+            fontSize = 10.5.sp,
+            color = Color.Gray
         )
-        // نکته: داخل یک Column اسکرول‌شونده نمی‌توان LazyColumn گذاشت (ارتفاع
-        // بی‌نهایت و کرش). چون خودِ صفحه اسکرول دارد، ردیف‌ها مستقیم رندر می‌شوند.
-        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            activeExpenses.forEach { expense ->
-                Card(
-                    modifier = Modifier.fillMaxWidth(),
-                    shape = RoundedCornerShape(12.dp)
-                ) {
+
+        if (sectionParties.isEmpty()) {
+            Text(
+                text = t(
+                    "هنوز ظرفی در این بخش ثبت نشده است. با دکمهٔ «افزودن ظرف» اولین طرف‌حساب را بسازید (مثلاً «لابراتوار آ»).",
+                    "No party accounts yet. Use \"Add account\" to create the first one (e.g. Lab A)."
+                ),
+                fontSize = 11.sp,
+                color = Color.Gray,
+                modifier = Modifier.padding(vertical = 8.dp)
+            )
+        }
+
+        sectionParties.forEach { party ->
+            val ledger = partyLedgerOf(party, allExpensesRaw, expensePayments)
+            val invoiceCount = allExpensesRaw.count { !it.isDeleted && it.belongsToParty(party) }
+            val balanceColor = when {
+                ledger.isPartyDebtor -> Color(0xFF6A1B9A)
+                ledger.remaining > 0L -> Color(0xFFC2410C)
+                else -> Color(0xFF2E7D32)
+            }
+            Card(
+                modifier = Modifier.fillMaxWidth().clickable { selectedParty = party },
+                shape = RoundedCornerShape(12.dp)
+            ) {
+                Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                     Row(
-                        modifier = Modifier.padding(10.dp),
+                        modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.SpaceBetween,
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         Column(modifier = Modifier.weight(1f)) {
-                            Text(com.example.data.partyLabelOf(expense), fontWeight = FontWeight.Bold, fontSize = 12.sp)
+                            Text(party.displayLabel, fontWeight = FontWeight.Bold, fontSize = 13.sp)
                             Text(
-                                text = listOfNotNull(
-                                    expense.description.takeIf { it.isNotBlank() },
-                                    viewModel.formatDate(expense.date)
-                                ).joinToString(" — "),
-                                fontSize = 10.sp,
-                                color = Color.Gray,
-                                maxLines = 2,
-                                overflow = TextOverflow.Ellipsis
+                                text = listOfNotNull(party.code.takeIf { it.isNotBlank() }, party.phone.takeIf { it.isNotBlank() }).joinToString(" — "),
+                                fontSize = 9.5.sp,
+                                color = Color.Gray
                             )
                         }
-                        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                        Column(horizontalAlignment = Alignment.End) {
+                            Text("${formatAmount(ledger.orders)} $currency", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.error)
                             Text(
-                                text = "${formatAmount(expense.amount)} $currency",
-                                fontWeight = FontWeight.ExtraBold,
-                                fontSize = 12.sp,
-                                color = MaterialTheme.colorScheme.error
+                                text = when {
+                                    ledger.isPartyDebtor -> "${t("بستانکار", "Credit")}: ${formatAmount(ledger.partyDebtAmount)} $currency"
+                                    ledger.remaining > 0L -> "${t("مانده", "Due")}: ${formatAmount(ledger.debtAmount)} $currency"
+                                    else -> "${t("مانده", "Due")}: 0 $currency"
+                                },
+                                fontSize = 10.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = balanceColor
                             )
-                            IconButton(
-                                onClick = { expenseToEdit = expense },
-                                modifier = Modifier.size(28.dp)
+                        }
+                    }
+                    Text(
+                        text = "${t("فاکتورها:", "Invoices:")} ${if (isPersian) com.example.util.PersianNumberFormatter.toPersianDigits(invoiceCount.toString()) else invoiceCount}" +
+                            "  |  ${t("پرداختی:", "Paid:")} ${formatAmount(ledger.paid)} $currency",
+                        fontSize = 9.5.sp,
+                        color = Color.Gray
+                    )
+                }
+            }
+        }
+        Spacer(Modifier.height(8.dp))
+    }
+
+    if (showAddParty) {
+        AddPartyAccountDialog(
+            viewModel = viewModel,
+            section = section,
+            isPersian = isPersian,
+            onDismiss = { showAddParty = false }
+        )
+    }
+    if (selectedParty != null) {
+        PartyLedgerDialog(
+            viewModel = viewModel,
+            party = selectedParty!!,
+            isPersian = isPersian,
+            currency = currency,
+            onDismiss = { selectedParty = null }
+        )
+    }
+}
+
+/** دیالوگ افزودن ظرف حساب جدید به یک بخش (مثل «لابراتوار آ»). */
+@Composable
+private fun AddPartyAccountDialog(
+    viewModel: DentalViewModel,
+    section: PartySection,
+    isPersian: Boolean,
+    onDismiss: () -> Unit
+) {
+    fun t(fa: String, en: String) = if (isPersian) fa else en
+    var name by remember { mutableStateOf("") }
+    var phone by remember { mutableStateOf("") }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = {
+            Text(t("افزودن ظرف حساب", "Add party account"), fontWeight = FontWeight.Bold, fontSize = 14.sp)
+        },
+        text = {
+            Column(
+                modifier = Modifier.fillMaxWidth(),
+                verticalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                Text(
+                    text = t("بخش: ${section.title(isPersian)}", "Section: ${section.title(isPersian)}"),
+                    fontSize = 11.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = MaterialTheme.colorScheme.primary
+                )
+                OutlinedTextField(
+                    value = name, onValueChange = { name = it },
+                    label = { Text(t("نام ظرف (مثلاً «آ»، «ب» یا نام طرف‌حساب)", "Account name (e.g. A, B or party name)")) },
+                    modifier = Modifier.fillMaxWidth(), singleLine = true
+                )
+                OutlinedTextField(
+                    value = phone, onValueChange = { phone = it },
+                    label = { Text(t("تلفن (اختیاری — برای ارسال صورتحساب)", "Phone (optional — for statements)")) },
+                    modifier = Modifier.fillMaxWidth(), singleLine = true
+                )
+                Text(
+                    text = t("پیش‌نمایش: «${partyDisplayLabel(section.faTitle, name.trim())}»", "Preview: \"${partyDisplayLabel(section.faTitle, name.trim())}\""),
+                    fontSize = 10.sp,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+        },
+        confirmButton = {
+            Button(
+                onClick = {
+                    viewModel.addPartyAccount(section, name, phone)
+                    onDismiss()
+                },
+                enabled = name.trim().isNotBlank()
+            ) { Text(t("ثبت", "Save"), fontWeight = FontWeight.Bold) }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) { Text(t("انصراف", "Cancel")) }
+        }
+    )
+}
+
+/** یک سطر دفتر ظرف: تاریخ، شرح، مبلغ (مثبت = فاکتور، منفی = پرداخت). */
+private data class PartyLedgerRowUi(val date: Long, val label: String, val amount: Long)
+
+/**
+ * دفتر یک ظرف حساب — فاکتورها (+) و پرداختی‌ها (−) به‌ترتیب تاریخ با ترازِ تجمعی.
+ * مانده فقط از همین توالی محاسبه می‌شود؛ «تسویه» به‌عنوان وضعیت ذخیره/نمایش داده نمی‌شود.
+ */
+@Composable
+private fun PartyLedgerDialog(
+    viewModel: DentalViewModel,
+    party: PartyAccount,
+    isPersian: Boolean,
+    currency: String,
+    onDismiss: () -> Unit
+) {
+    fun t(fa: String, en: String) = if (isPersian) fa else en
+    val allExpensesRaw by viewModel.clinicExpenses.collectAsStateWithLifecycle()
+    val expensePayments by viewModel.allExpensePayments.collectAsStateWithLifecycle()
+    val bankAccounts by viewModel.bankAccounts.collectAsStateWithLifecycle()
+    val allPayments by viewModel.allPayments.collectAsStateWithLifecycle()
+
+    val partyInvoices = allExpensesRaw.filter { !it.isDeleted && it.belongsToParty(party) }.sortedBy { it.date }
+    val partyInvoiceIds = partyInvoices.map { it.id }.toSet()
+    val partyPayments = expensePayments
+        .filter { !it.isDeleted && ((it.partyAccountId != null && it.partyAccountId == party.id) || it.clinicExpenseId in partyInvoiceIds) }
+        .sortedBy { it.date }
+    val ledger = PartyLedger(partyInvoices.sumOf { it.amount }, partyPayments.sumOf { it.amount })
+
+    var showInvoiceForm by remember { mutableStateOf(false) }
+    var showPayForm by remember { mutableStateOf(false) }
+    var showChequePicker by remember { mutableStateOf(false) }
+
+    val rows = remember(partyInvoices, partyPayments) {
+        val list = mutableListOf<PartyLedgerRowUi>()
+        partyInvoices.forEach { inv ->
+            val invLabel = inv.invoiceNumber.ifBlank { t("فاکتور", "Invoice") }
+            list.add(PartyLedgerRowUi(inv.date, "$invLabel — ${inv.description.ifBlank { "—" }}", inv.amount))
+        }
+        partyPayments.forEach { pay ->
+            val methodLabel = when (pay.method) {
+                "CASH" -> t("نقدی", "Cash")
+                "POS" -> t("کارتخوان", "POS")
+                "CHEQUE" -> t("چک", "Cheque")
+                else -> t("کارت به کارت", "Card")
+            }
+            list.add(PartyLedgerRowUi(pay.date, "${t("پرداخت", "Payment")} ($methodLabel) — ${pay.note.ifBlank { "—" }}", -pay.amount))
+        }
+        list.sortedBy { it.date }
+    }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = {
+            Column {
+                Text("${party.displayLabel} (${party.code})", fontWeight = FontWeight.Bold, fontSize = 14.sp)
+                Text(
+                    text = t("دفتر طرف‌حساب — فاکتورها و پرداختی‌ها به‌ترتیب تاریخ", "Party ledger — invoices & payments by date"),
+                    fontSize = 10.sp,
+                    color = Color.Gray
+                )
+            }
+        },
+        text = {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .heightIn(max = 520.dp)
+                    .verticalScroll(rememberScrollState()),
+                verticalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                val balanceColor = when {
+                    ledger.isPartyDebtor -> Color(0xFF6A1B9A)
+                    ledger.remaining > 0L -> Color(0xFFC2410C)
+                    else -> Color(0xFF2E7D32)
+                }
+                Surface(
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(10.dp),
+                    color = balanceColor.copy(alpha = 0.10f),
+                    border = BorderStroke(1.dp, balanceColor.copy(alpha = 0.35f))
+                ) {
+                    Column(modifier = Modifier.padding(10.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                        Text(
+                            text = "${t("جمع فاکتورها:", "Invoices:")} ${formatAmount(ledger.orders)} $currency" +
+                                "  |  ${t("پرداختی:", "Paid:")} ${formatAmount(ledger.paid)} $currency",
+                            fontSize = 10.5.sp,
+                            color = Color.Gray
+                        )
+                        Text(
+                            text = when {
+                                ledger.isPartyDebtor ->
+                                    t(
+                                        "${party.displayLabel} به ما بدهکار است: ${formatAmount(ledger.partyDebtAmount)} $currency",
+                                        "${party.displayLabel} owes us: ${formatAmount(ledger.partyDebtAmount)} $currency"
+                                    )
+                                ledger.remaining > 0L ->
+                                    "${t("مانده بدهی ما:", "Our debt:")} ${formatAmount(ledger.debtAmount)} $currency"
+                                else ->
+                                    "${t("مانده:", "Balance:")} 0 $currency"
+                            },
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = balanceColor
+                        )
+                    }
+                }
+
+                Row(
+                    modifier = Modifier.fillMaxWidth().horizontalScrollCompat(),
+                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                ) {
+                    FilterChip(selected = false, onClick = { showInvoiceForm = true }, label = { Text(t("صدور فاکتور", "Invoice"), fontSize = 9.5.sp) })
+                    FilterChip(selected = false, onClick = { showPayForm = true }, label = { Text(t("ثبت پرداخت", "Pay"), fontSize = 9.5.sp) })
+                    FilterChip(selected = false, onClick = { showChequePicker = true }, label = { Text(t("انتقال چک", "Cheque"), fontSize = 9.5.sp) })
+                }
+
+                Text(
+                    text = t("توالی حساب (تراز تجمعی):", "Ledger sequence (running balance):"),
+                    fontSize = 10.5.sp,
+                    color = Color.Gray
+                )
+
+                if (rows.isEmpty()) {
+                    Text(
+                        text = t("هنوز فاکتور یا پرداختی برای این ظرف ثبت نشده است.", "No invoices or payments for this party yet."),
+                        fontSize = 11.sp,
+                        color = Color.Gray
+                    )
+                }
+                var running = 0L
+                rows.forEach { r ->
+                    running += r.amount
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(8.dp))
+                            .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.35f))
+                            .padding(horizontal = 10.dp, vertical = 7.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            text = viewModel.formatDate(r.date),
+                            fontSize = 9.5.sp,
+                            color = Color.Gray,
+                            modifier = Modifier.width(78.dp)
+                        )
+                        Text(
+                            text = r.label,
+                            fontSize = 10.5.sp,
+                            fontWeight = FontWeight.SemiBold,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                            modifier = Modifier.weight(1f)
+                        )
+                        Text(
+                            text = if (r.amount >= 0) "+${formatAmount(r.amount)}" else "-${formatAmount(-r.amount)}",
+                            fontSize = 10.5.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = if (r.amount >= 0) MaterialTheme.colorScheme.error else Color(0xFF2E7D32)
+                        )
+                        Spacer(Modifier.width(8.dp))
+                        Text(
+                            text = "${formatAmount(running)} $currency",
+                            fontSize = 9.sp,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                }
+
+                // ارسال صورت‌حساب و فاکتور این طرف‌حساب — با همان مولد استاندارد اسناد
+                ExpensePartySendActionsRow(
+                    partyName = party.displayLabel,
+                    expenses = partyInvoices,
+                    payments = partyPayments,
+                    viewModel = viewModel,
+                    isPersian = isPersian
+                )
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = onDismiss) { Text(t("بستن", "Close")) }
+        },
+        dismissButton = {}
+    )
+
+    if (showInvoiceForm) {
+        AddPartyInvoiceDialog(
+            viewModel = viewModel,
+            party = party,
+            isPersian = isPersian,
+            currency = currency,
+            onDismiss = { showInvoiceForm = false }
+        )
+    }
+    if (showPayForm) {
+        PayPartyDialog(
+            viewModel = viewModel,
+            party = party,
+            invoices = partyInvoices,
+            bankAccounts = bankAccounts.filter { !it.isDeleted },
+            isPersian = isPersian,
+            currency = currency,
+            onDismiss = { showPayForm = false }
+        )
+    }
+    if (showChequePicker) {
+        PickChequeForPartyDialog(
+            viewModel = viewModel,
+            party = party,
+            allPayments = allPayments,
+            isPersian = isPersian,
+            currency = currency,
+            onDismiss = { showChequePicker = false }
+        )
+    }
+}
+
+/** صدور فاکتور برای ظرف — بدون پرداختِ هم‌زمان (خواستهٔ کاربر). */
+@Composable
+private fun AddPartyInvoiceDialog(
+    viewModel: DentalViewModel,
+    party: PartyAccount,
+    isPersian: Boolean,
+    currency: String,
+    onDismiss: () -> Unit
+) {
+    fun t(fa: String, en: String) = if (isPersian) fa else en
+    var amountStr by remember { mutableStateOf("") }
+    var desc by remember { mutableStateOf("") }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = {
+            Text(t("صدور فاکتور — ${party.displayLabel}", "Invoice — ${party.displayLabel}"), fontWeight = FontWeight.Bold, fontSize = 13.sp)
+        },
+        text = {
+            Column(
+                modifier = Modifier.fillMaxWidth(),
+                verticalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                Text(
+                    text = t(
+                        "فاکتور بدون پرداختِ هم‌زمان ثبت می‌شود؛ پرداخت بعداً از «ثبت پرداخت»، صندوق نقدی، پیامک بانکی یا انتقال چک انجام می‌شود.",
+                        "The invoice is recorded without a simultaneous payment; pay later via \"Pay\", cash funds, bank SMS or cheque transfer."
+                    ),
+                    fontSize = 10.sp,
+                    color = Color.Gray
+                )
+                OutlinedTextField(
+                    value = amountStr, onValueChange = { amountStr = it.filter(Char::isDigit) },
+                    label = { Text("${t("مبلغ فاکتور", "Invoice amount")} ($currency)") },
+                    modifier = Modifier.fillMaxWidth(), singleLine = true
+                )
+                RealTimeAmountHelper(amountStr, isPersian)
+                OutlinedTextField(
+                    value = desc, onValueChange = { desc = it },
+                    label = { Text(t("شرح (اختیاری)", "Description (optional)")) },
+                    modifier = Modifier.fillMaxWidth(), singleLine = true
+                )
+            }
+        },
+        confirmButton = {
+            Button(
+                onClick = {
+                    val amount = amountStr.trim().toLongOrNull() ?: 0L
+                    if (amount > 0L) {
+                        viewModel.addPartyInvoice(party, amount, desc.trim())
+                        onDismiss()
+                    }
+                },
+                enabled = (amountStr.trim().toLongOrNull() ?: 0L) > 0L
+            ) { Text(t("ثبت فاکتور", "Save Invoice"), fontWeight = FontWeight.Bold) }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) { Text(t("انصراف", "Cancel")) }
+        }
+    )
+}
+
+/**
+ * پرداخت به ظرف حساب — کلیِ ظرف یا روی یک فاکتور مشخص.
+ * روش‌ها: نقدی از صندوق‌ها (bankAccountId = صندوق/تنخواه)، کارت به کارت، کارتخوان (پوز).
+ * چک از «انتقال چک» و برداشت پیامک بانکی از همان مسیر پیامک انجام می‌شود.
+ */
+@Composable
+private fun PayPartyDialog(
+    viewModel: DentalViewModel,
+    party: PartyAccount,
+    invoices: List<ClinicExpense>,
+    bankAccounts: List<BankAccount>,
+    isPersian: Boolean,
+    currency: String,
+    onDismiss: () -> Unit
+) {
+    fun t(fa: String, en: String) = if (isPersian) fa else en
+    var amountStr by remember { mutableStateOf("") }
+    var method by remember { mutableStateOf("CARD_TRANSFER") }
+    var selectedAccountId by remember { mutableStateOf<Long?>(null) }
+    var selectedInvoiceId by remember { mutableStateOf<Long?>(null) } // null = پرداخت کلیِ ظرف
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = {
+            Text(t("ثبت پرداخت — ${party.displayLabel}", "Pay — ${party.displayLabel}"), fontWeight = FontWeight.Bold, fontSize = 13.sp)
+        },
+        text = {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .heightIn(max = 460.dp)
+                    .verticalScroll(rememberScrollState()),
+                verticalArrangement = Arrangement.spacedBy(9.dp)
+            ) {
+                Text(t("طرف‌حساب: ${party.displayLabel}", "Party: ${party.displayLabel}"), fontSize = 11.sp, fontWeight = FontWeight.SemiBold)
+
+                Text(t("هدف پرداخت:", "Payment target:"), fontSize = 10.5.sp, color = Color.Gray)
+                Row(
+                    modifier = Modifier.fillMaxWidth().horizontalScrollCompat(),
+                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                ) {
+                    FilterChip(selected = selectedInvoiceId == null, onClick = { selectedInvoiceId = null }, label = { Text(t("کلیِ ظرف", "Whole party"), fontSize = 10.sp) })
+                    invoices.take(8).forEach { inv ->
+                        FilterChip(
+                            selected = selectedInvoiceId == inv.id,
+                            onClick = { selectedInvoiceId = inv.id },
+                            label = { Text("${inv.invoiceNumber.ifBlank { inv.id.toString() }} (${formatAmount(inv.amount)})", fontSize = 9.sp, maxLines = 1) }
+                        )
+                    }
+                }
+
+                OutlinedTextField(
+                    value = amountStr, onValueChange = { amountStr = it.filter(Char::isDigit) },
+                    label = { Text("${t("مبلغ پرداخت", "Amount")} ($currency)") },
+                    modifier = Modifier.fillMaxWidth(), singleLine = true
+                )
+                RealTimeAmountHelper(amountStr, isPersian)
+
+                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    listOf(
+                        "CASH" to t("نقدی (صندوق)", "Cash (fund)"),
+                        "CARD_TRANSFER" to t("کارت به کارت", "Card"),
+                        "POS" to t("کارتخوان", "POS")
+                    ).forEach { (key, labelTxt) ->
+                        FilterChip(
+                            selected = method == key,
+                            onClick = { method = key },
+                            label = { Text(labelTxt, fontSize = 9.5.sp) },
+                            modifier = Modifier.weight(1f)
+                        )
+                    }
+                }
+
+                // نقدی → صندوق‌ها جلوتر؛ کارت/پوز → حساب‌های بانکی (صندوق هم قابل انتخاب است)
+                val pool = if (method == "CASH") {
+                    (bankAccounts.filter { it.isCashFund } + bankAccounts.filter { !it.isCashFund }).distinctBy { it.id }
+                } else bankAccounts
+                if (pool.isNotEmpty()) {
+                    Text(
+                        text = if (method == "CASH") t("صندوق نقدی کسر شونده:", "Debit cash fund:")
+                        else t("حساب بانکی کسر شونده:", "Debit bank account:"),
+                        fontSize = 10.sp,
+                        color = Color.Gray
+                    )
+                    pool.forEach { acc ->
+                        Surface(
+                            modifier = Modifier.fillMaxWidth(),
+                            shape = RoundedCornerShape(8.dp),
+                            color = if (selectedAccountId == acc.id) MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.5f) else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.35f),
+                            border = BorderStroke(1.dp, if (selectedAccountId == acc.id) MaterialTheme.colorScheme.primary else Color.Transparent),
+                            onClick = { selectedAccountId = acc.id }
+                        ) {
+                            Row(
+                                modifier = Modifier.padding(8.dp),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
                             ) {
-                                Icon(Icons.Default.Edit, contentDescription = "Edit Expense", tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(15.dp))
-                            }
-                            IconButton(
-                                onClick = { expenseToDelete = expense },
-                                modifier = Modifier.size(28.dp)
-                            ) {
-                                Icon(Icons.Default.Delete, contentDescription = "Delete Expense", tint = MaterialTheme.colorScheme.error, modifier = Modifier.size(15.dp))
+                                Text(acc.bankName, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                                Text("${formatAmount(acc.balance)} $currency", fontSize = 10.sp, color = Color.Gray)
                             }
                         }
                     }
                 }
             }
-            Spacer(Modifier.height(12.dp))
+        },
+        confirmButton = {
+            Button(
+                onClick = {
+                    val amount = amountStr.trim().toLongOrNull() ?: 0L
+                    if (amount > 0L) {
+                        val inv = invoices.firstOrNull { it.id == selectedInvoiceId }
+                        if (inv != null) {
+                            viewModel.payPartyInvoice(party, inv, amount, method, selectedAccountId)
+                        } else {
+                            viewModel.addPartyPayment(party, amount, method, selectedAccountId)
+                        }
+                        onDismiss()
+                    }
+                },
+                enabled = (amountStr.trim().toLongOrNull() ?: 0L) > 0L
+            ) { Text(t("ثبت پرداخت", "Pay"), fontWeight = FontWeight.Bold) }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) { Text(t("انصراف", "Cancel")) }
         }
-    }
-
-    // دیالوگ ویرایش هزینه
-    if (expenseToEdit != null) {
-        EditClinicExpenseDialog(
-            expense = expenseToEdit!!,
-            currency = currency,
-            isPersian = isPersian,
-            viewModel = viewModel,
-            onDismiss = { expenseToEdit = null }
-        )
-    }
-
-    // دیالوگ تایید حذف هزینه
-    if (expenseToDelete != null) {
-        AlertDialog(
-            onDismissRequest = { expenseToDelete = null },
-            title = {
-                Text(
-                    t("حذف هزینه", "Delete Expense"),
-                    fontWeight = FontWeight.Bold,
-                    color = MaterialTheme.colorScheme.error
-                )
-            },
-            text = {
-                Text(
-                    t(
-                        "آیا از حذف هزینه «${expenseToDelete!!.category}» به مبلغ ${formatAmount(expenseToDelete!!.amount)} $currency اطمینان دارید؟",
-                        "Are you sure you want to delete expense '${expenseToDelete!!.category}' for ${formatAmount(expenseToDelete!!.amount)} $currency?"
-                    )
-                )
-            },
-            confirmButton = {
-                Button(
-                    onClick = {
-                        viewModel.deleteExpense(expenseToDelete!!)
-                        expenseToDelete = null
-                    },
-                    colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error)
-                ) {
-                    Text(t("حذف", "Delete"), fontWeight = FontWeight.Bold)
-                }
-            },
-            dismissButton = {
-                TextButton(onClick = { expenseToDelete = null }) {
-                    Text(t("انصراف", "Cancel"))
-                }
-            }
-        )
-    }
-
-    // دیالوگ پرداخت یک هزینه (تمام یا بخشی از مانده)
-    if (expenseToPay != null) {
-        PayExpenseDialog(
-            expense = expenseToPay!!,
-            alreadyPaid = expensePayments.filter { !it.isDeleted && it.clinicExpenseId == expenseToPay!!.id }.sumOf { it.amount },
-            bankAccounts = bankAccounts.filter { !it.isDeleted },
-            isPersian = isPersian,
-            currency = currency,
-            viewModel = viewModel,
-            onDismiss = { expenseToPay = null }
-        )
-    }
-
-    // تأیید «وصول» چکِ هزینه
-    if (expenseChequeToClear != null) {
-        val c = expenseChequeToClear!!
-        AlertDialog(
-            onDismissRequest = { expenseChequeToClear = null },
-            title = { Text(t("تأیید وصول چک", "Confirm cheque cleared"), fontWeight = FontWeight.Bold) },
-            text = {
-                Text(
-                    t(
-                        "چک ${c.chequeNumber.orEmpty().ifBlank { "—" }} به مبلغ ${formatAmount(c.amount)} $currency وصول‌شده ثبت شود؟",
-                        "Mark cheque ${c.chequeNumber.orEmpty()} for ${formatAmount(c.amount)} $currency as cleared?"
-                    ),
-                    fontSize = 12.sp
-                )
-            },
-            confirmButton = {
-                Button(onClick = { viewModel.markChequeCleared(c); expenseChequeToClear = null }) {
-                    Text(t("بله، وصول شد", "Yes, cleared"), fontWeight = FontWeight.Bold)
-                }
-            },
-            dismissButton = { TextButton(onClick = { expenseChequeToClear = null }) { Text(t("انصراف", "Cancel")) } }
-        )
-    }
-
-    // تأیید «برگشت» چکِ هزینه
-    if (expenseChequeToBounce != null) {
-        val c = expenseChequeToBounce!!
-        AlertDialog(
-            onDismissRequest = { expenseChequeToBounce = null },
-            title = { Text(t("تأیید برگشت چک", "Confirm cheque bounced"), fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.error) },
-            text = {
-                Text(
-                    t(
-                        "چک ${c.chequeNumber.orEmpty().ifBlank { "—" }} به مبلغ ${formatAmount(c.amount)} $currency برگشتی ثبت شود؟ تسویه‌ای که این چک انجام داده بود برمی‌گردد.",
-                        "Mark cheque ${c.chequeNumber.orEmpty()} for ${formatAmount(c.amount)} $currency as bounced? Any settlement it made will be reversed."
-                    ),
-                    fontSize = 12.sp
-                )
-            },
-            confirmButton = {
-                Button(
-                    onClick = { viewModel.markChequeBounced(c); expenseChequeToBounce = null },
-                    colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error)
-                ) { Text(t("بله، برگشت خورد", "Yes, bounced"), fontWeight = FontWeight.Bold) }
-            },
-            dismissButton = { TextButton(onClick = { expenseChequeToBounce = null }) { Text(t("انصراف", "Cancel")) } }
-        )
-    }
+    )
 }
 
+/** انتخاب چکِ قابل‌انتقال (در جریان وصول) و انتقال آن به این ظرف — با اثرِ حسابداری. */
 @Composable
+private fun PickChequeForPartyDialog(
+    viewModel: DentalViewModel,
+    party: PartyAccount,
+    allPayments: List<Payment>,
+    isPersian: Boolean,
+    currency: String,
+    onDismiss: () -> Unit
+) {
+    fun t(fa: String, en: String) = if (isPersian) fa else en
+    val transferable = allPayments.filter { !it.isDeleted && it.type == "CHEQUE" && it.chequeStatus == "PENDING" }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = {
+            Text(t("انتقال چک به ${party.displayLabel}", "Transfer cheque to ${party.displayLabel}"), fontWeight = FontWeight.Bold, fontSize = 13.sp)
+        },
+        text = {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .heightIn(max = 420.dp)
+                    .verticalScroll(rememberScrollState()),
+                verticalArrangement = Arrangement.spacedBy(6.dp)
+            ) {
+                if (transferable.isEmpty()) {
+                    Text(
+                        text = t(
+                            "چکِ قابل انتقالی (در جریان وصول) وجود ندارد. چک‌ها از «مدیریت چک‌های صیادی» به همین ظرف قابل انتقال‌اند.",
+                            "No transferable (in-progress) cheques. Transfer happens from the Sayad cheques manager to this party."
+                        ),
+                        fontSize = 11.sp,
+                        color = Color.Gray
+                    )
+                }
+                transferable.forEach { cheque ->
+                    Surface(
+                        modifier = Modifier.fillMaxWidth(),
+                        shape = RoundedCornerShape(8.dp),
+                        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.35f),
+                        onClick = {
+                            viewModel.transferChequeToParty(cheque, party)
+                            onDismiss()
+                        }
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(10.dp),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text("${cheque.chequeBank.orEmpty().ifBlank { t("چک", "Cheque") }} ${cheque.chequeNumber.orEmpty()}", fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                                Text("${t("سررسید:", "Due:")} ${cheque.chequeDueDate?.let { viewModel.formatDate(it) } ?: "—"}", fontSize = 9.5.sp, color = Color.Gray)
+                            }
+                            Text("${formatAmount(cheque.amount)} $currency", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
+                        }
+                    }
+                }
+                Text(
+                    text = t(
+                        "با انتقال، مبلغ چک بلافاصله به‌عنوان پرداختِ همین ظرف در دفتر ثبت می‌شود و وضعیت چک «انتقال یافته» می‌گیرد.",
+                        "On transfer, the cheque amount is posted immediately to this party's ledger and the cheque becomes \"Transferred\"."
+                    ),
+                    fontSize = 10.sp,
+                    color = Color.Gray
+                )
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = onDismiss) { Text(t("بستن", "Close")) }
+        },
+        dismissButton = {}
+    )
+}
+
+
 private fun EditClinicExpenseDialog(
     expense: ClinicExpense,
     currency: String,

@@ -56,6 +56,7 @@ object Supabase {
     const val TABLE_EQUIPMENT_MAINTENANCES = "equipment_maintenance"
     const val TABLE_CLINIC_EXPENSES = "clinic_expenses"
     const val TABLE_EXPENSE_PAYMENTS = "expense_payments"
+    const val TABLE_PARTY_ACCOUNTS = "party_accounts"
     const val TABLE_PERSONAL_TRANSACTIONS = "personal_transactions"
     const val TABLE_LAB_SERVICES = "lab_services"
     const val TABLE_INSTALLMENTS = "installments"
@@ -880,6 +881,7 @@ object SyncCollections {
         Supabase.TABLE_DRUG_TEMPLATES,
         Supabase.TABLE_LAB_SERVICES,
         Supabase.TABLE_APP_CALENDAR_EVENTS,
+        Supabase.TABLE_PARTY_ACCOUNTS,
         // 2. والدین ریشه
         Supabase.TABLE_PATIENTS,
         Supabase.TABLE_VENDORS,
