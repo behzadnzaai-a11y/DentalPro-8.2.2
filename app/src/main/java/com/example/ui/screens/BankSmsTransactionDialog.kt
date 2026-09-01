@@ -219,7 +219,7 @@ fun BankSmsTransactionDialog(
         )
     }
 
-    // پاپ‌آپ انتخاب ظرف حساب (برداشتِ پیامکی به طرف‌حسابِ هزینه‌های مطب)
+    // پاپ‌آپ انتخاب طرف حساب (برداشتِ پیامکی به طرف‌حسابِ هزینه‌های مطب)
     if (partyPickerRowId != null) {
         PartyWithdrawTargetPickerDialog(
             isPersian = isPersian,
@@ -513,12 +513,12 @@ fun BankSmsTransactionDialog(
                                                 }
                                             )
                                         }
-                                        // ظرف‌های حساب (طرف‌حساب‌های هزینه‌های مطب): پرداختِ کلیِ ظرف —
-                                        // بدون نیاز به فاکتورِ مشخص؛ در دفتر ظرف ثبت می‌شود (clinicExpenseId = 0).
+                                        // طرف‌حساب‌ها (طرف‌حساب‌های هزینه‌های مطب): پرداختِ کلیِ طرف‌حساب —
+                                        // بدون نیاز به فاکتورِ مشخص؛ در دفتر طرف‌حساب ثبت می‌شود (clinicExpenseId = 0).
                                         if (partyAccounts.any { !it.isDeleted }) {
                                             HorizontalDivider()
                                             DropdownMenuItem(
-                                                text = { Text("📒 ظرف‌های حساب (پرداخت کلیِ طرف‌حساب)...", fontSize = 11.sp, fontWeight = FontWeight.Bold) },
+                                                text = { Text("📒 طرف‌حساب‌ها (پرداخت کلیِ طرف‌حساب)...", fontSize = 11.sp, fontWeight = FontWeight.Bold) },
                                                 onClick = {
                                                     targetExpanded = false
                                                     partyPickerRowId = row.id
@@ -731,7 +731,7 @@ fun BankSmsTransactionDialog(
  *  - تیک برای لیست اشخاص در بخش فرزندان (حساب اشخاص، قابل گزارش‌گیری با نام شخص و ریز حساب)
  */
 @Composable
-/** انتخاب «ظرف حساب» برای برداشتِ پیامکی به طرف‌حسابِ هزینه‌های مطب (ثبت در دفتر ظرف). */
+/** انتخاب «طرف حساب» برای برداشتِ پیامکی به طرف‌حسابِ هزینه‌های مطب (ثبت در دفتر طرف‌حساب). */
 @Composable
 fun PartyWithdrawTargetPickerDialog(
     isPersian: Boolean = true,
@@ -744,7 +744,7 @@ fun PartyWithdrawTargetPickerDialog(
         onDismissRequest = onDismiss,
         title = {
             Text(
-                text = if (isPersian) "انتخاب ظرف حساب (طرف‌حساب هزینه‌های مطب)" else "Select party account",
+                text = if (isPersian) "انتخاب طرف حساب (طرف‌حساب هزینه‌های مطب)" else "Select party account",
                 fontWeight = FontWeight.Bold,
                 fontSize = 14.sp
             )
@@ -759,7 +759,7 @@ fun PartyWithdrawTargetPickerDialog(
             ) {
                 if (sorted.isEmpty()) {
                     Text(
-                        text = if (isPersian) "هنوز ظرف حسابی در «هزینه‌های مطب» تعریف نشده است."
+                        text = if (isPersian) "هنوز طرف حسابی در «هزینه‌های مطب» تعریف نشده است."
                         else "No party accounts defined in Clinic Expenses yet.",
                         fontSize = 11.sp,
                         color = Color.Gray
@@ -803,7 +803,7 @@ fun PartyWithdrawTargetPickerDialog(
                     }
                 }
                 Text(
-                    text = if (isPersian) "با انتخاب، مبلغِ برداشت به‌عنوان «پرداخت به این ظرف» در دفتر طرف‌حساب ثبت می‌شود."
+                    text = if (isPersian) "با انتخاب، مبلغِ برداشت به‌عنوان «پرداخت به این طرف‌حساب» در دفتر طرف‌حساب ثبت می‌شود."
                     else "On selection, the withdrawal is posted to the party's ledger as a payment.",
                     fontSize = 10.sp,
                     color = Color.Gray,

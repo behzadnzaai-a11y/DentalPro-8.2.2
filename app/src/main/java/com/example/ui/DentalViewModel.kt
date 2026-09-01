@@ -162,10 +162,14 @@ class DentalViewModel(application: Application) : AndroidViewModel(application) 
             kotlinx.coroutines.delay(5_000)
             checkForAppUpdate()
         }
-        // Backfill یک‌باره و idempotent: داده‌های قدیمیِ هزینه‌ها به ظرف‌های حساب
+        // Backfill یک‌باره و idempotent: داده‌های قدیمیِ هزینه‌ها به طرف‌حساب‌ها
         // (party_accounts) پیوند می‌خورند تا هابِ جدید بلافاصله درست کار کند.
         viewModelScope.launch(Dispatchers.IO) {
             runCatching { repository.migrateLegacyExpenseParties() }
+            // اصلاح سرفصل‌های شخصی (جریمهٔ دیرکرد بانک ← هزینه‌های اداری) و ساختِ
+            // طرف‌حساب‌های پیش‌فرضِ «هزینه‌های جاری مطب» (اجاره/شارژ/قبوض) — idempotent.
+            runCatching { repository.migratePersonalHeadingFixes() }
+            runCatching { repository.ensureDefaultRunningParties() }
         }
         // کلیدهای API از سرور خوانده می‌شوند (منبع حقیقت سرور است؛ کش محلی فقط
         // برای کار در حالت آفلاین نگه داشته می‌شود).
@@ -1650,7 +1654,7 @@ class DentalViewModel(application: Application) : AndroidViewModel(application) 
     val maintenanceList = repository.allMaintenance.stateIn(viewModelScope, SharingStarted.Lazily, emptyList())
     val clinicExpenses = repository.allExpenses.stateIn(viewModelScope, SharingStarted.Lazily, emptyList())
     val allExpensePayments = repository.allExpensePayments.stateIn(viewModelScope, SharingStarted.Lazily, emptyList())
-    // ظرف‌های حساب (طرف‌حساب چندظرفیِ هزینه‌های مطب) — فقط ظرف‌های فعال.
+    // طرف‌حساب‌ها (طرف‌حساب چندطرف‌حسابیِ هزینه‌های مطب) — فقط طرف‌حساب‌های فعال.
     val partyAccounts: StateFlow<List<com.example.data.PartyAccount>> = repository.allPartyAccounts
         .map { list -> list.filter { !it.isDeleted }.sortedWith(compareBy({ it.section }, { it.name })) }
         .stateIn(viewModelScope, SharingStarted.Lazily, emptyList())
@@ -2525,7 +2529,7 @@ class DentalViewModel(application: Application) : AndroidViewModel(application) 
             if (totalOrders > 0) {
                 val expDesc = "خرید از فروشنده ($name) - شرکت: $company - نوع کالا: $itemType"
                 // درخواست کاربر: «نیاز نیست به پرداخت هنگام ثبت» — فقط فاکتور ثبت می‌شود؛
-                // پرداخت از دفترِ ظرف حساب انجام می‌شود (نقد از صندوق / پیامک برداشت / چک).
+                // پرداخت از دفترِ طرف حساب انجام می‌شود (نقد از صندوق / پیامک برداشت / چک).
                 val storeParty = repository.findOrCreateParty(
                     com.example.data.PartySection.STORE,
                     com.example.data.PartySection.STORE.faTitle,
@@ -2873,7 +2877,7 @@ class DentalViewModel(application: Application) : AndroidViewModel(application) 
             val matchedVendor = vendors.value.firstOrNull { v ->
                 !v.isDeleted && v.name.trim().equals(labName.trim(), ignoreCase = true)
             }
-            // فاکتورِ سفارش به ظرفِ همان لابراتوار وصل می‌شود («لابراتوار آ» جدا از «لابراتوار ب»).
+            // فاکتورِ سفارش به طرف‌حسابِ همان لابراتوار وصل می‌شود («لابراتوار آ» جدا از «لابراتوار ب»).
             val labParty = repository.findOrCreateParty(
                 com.example.data.PartySection.LAB,
                 com.example.data.PartySection.LAB.faTitle,
@@ -3308,8 +3312,8 @@ class DentalViewModel(application: Application) : AndroidViewModel(application) 
             )
             if (cost > 0) {
                 val expDesc = "تعمیر و نگهداری ($equipment) - $desc"
-                // فاکتورِ سرویس به ظرفِ «فنی مهندسی» با نام تکنسین وصل می‌شود
-                // (هر تکنسین/شرکتِ تعمیراتی ظرفِ خودش را دارد).
+                // فاکتورِ سرویس به طرف‌حسابِ «فنی مهندسی» با نام تکنسین وصل می‌شود
+                // (هر تکنسین/شرکتِ تعمیراتی طرف‌حسابِ خودش را دارد).
                 val engParty = repository.findOrCreateParty(
                     com.example.data.PartySection.ENGINEERING,
                     com.example.data.PartySection.ENGINEERING.faTitle,
@@ -3350,7 +3354,7 @@ class DentalViewModel(application: Application) : AndroidViewModel(application) 
             if (cost > 0) {
                 val invStr = if (!invoiceNum.isNullOrBlank()) " - فاکتور: $invoiceNum" else ""
                 val expDesc = "تعمیر و نگهداری ($equipment) - $desc$invStr"
-                // ظرفِ فنی مهندسی با نامِ واقعیِ تکنسین/شرکتِ تعمیراتی (نه نامِ کلی).
+                // طرف‌حسابِ فنی مهندسی با نامِ واقعیِ تکنسین/شرکتِ تعمیراتی (نه نامِ کلی).
                 val engParty = repository.findOrCreateParty(
                     com.example.data.PartySection.ENGINEERING,
                     com.example.data.PartySection.ENGINEERING.faTitle,
@@ -3516,11 +3520,17 @@ class DentalViewModel(application: Application) : AndroidViewModel(application) 
     }
 
     // ======================================================================
-    //  ظرف‌های حساب (Party Accounts) — طرف‌حساب‌های چندظرفی هزینه‌های مطب
+    //  طرف‌حساب‌ها (Party Accounts) — طرف‌حساب‌های چندطرف‌حسابی هزینه‌های مطب
     // ======================================================================
 
-    /** افزودن ظرف جدید: مثلاً (LAB, «لابراتوار», «آ»). بدون تکرارِ (بخش، نام). */
-    fun addPartyAccount(section: com.example.data.PartySection, name: String, phone: String = "") {
+    /** افزودن طرف‌حساب جدید: مثلاً (LAB, «لابراتوار», «آ»). بدون تکرارِ (بخش، نام). */
+    fun addPartyAccount(
+        section: com.example.data.PartySection,
+        name: String,
+        phone: String = "",
+        notes: String = "",
+        title: String = ""
+    ) {
         val trimmed = name.trim()
         if (trimmed.isBlank()) return
         if (!authorizeDomain("expenses", "ADD_PARTY_ACCOUNT")) return
@@ -3541,9 +3551,10 @@ class DentalViewModel(application: Application) : AndroidViewModel(application) 
                 com.example.data.PartyAccount(
                     section = section.key,
                     code = code,
-                    title = section.faTitle,
+                    title = title.trim().ifBlank { section.faTitle },
                     name = trimmed,
-                    phone = phone.trim()
+                    phone = phone.trim(),
+                    notes = notes.trim()
                 )
             )
         }
@@ -3556,7 +3567,7 @@ class DentalViewModel(application: Application) : AndroidViewModel(application) 
         }
     }
 
-    /** حذف نرمِ ظرف — فاکتورها و پرداخت‌هایش برای حفظ دفتر باقی می‌مانند. */
+    /** حذف نرمِ طرف‌حساب — فاکتورها و پرداخت‌هایش برای حفظ دفتر باقی می‌مانند. */
     fun deletePartyAccount(account: com.example.data.PartyAccount) {
         if (!authorizeDomain("expenses", "DELETE_PARTY_ACCOUNT", isDelete = true)) return
         viewModelScope.launch {
@@ -3565,14 +3576,15 @@ class DentalViewModel(application: Application) : AndroidViewModel(application) 
     }
 
     /**
-     * صدور فاکتور برای یک ظرف — بدون پرداختِ هنگام ثبت (خواستهٔ کاربر).
+     * صدور فاکتور برای یک طرف‌حساب — بدون پرداختِ هنگام ثبت (خواستهٔ کاربر).
      * فاکتور در clinic_expenses با partyAccountId و شمارهٔ خودکارِ per-party می‌نشیند.
      */
     fun addPartyInvoice(
         party: com.example.data.PartyAccount,
         amount: Long,
         description: String = "",
-        date: Long = System.currentTimeMillis()
+        date: Long = System.currentTimeMillis(),
+        invoiceDetails: String = ""
     ) {
         if (amount <= 0L) return
         if (!authorizeDomain("expenses", "ADD_EXPENSE")) return
@@ -3583,7 +3595,7 @@ class DentalViewModel(application: Application) : AndroidViewModel(application) 
                     expenseGroup = party.section,
                     partyAccountId = party.id,
                     amount = amount,
-                    description = description.trim(),
+                    description = listOf(description.trim(), invoiceDetails.trim()).filter { it.isNotBlank() }.joinToString(" — "),
                     date = date,
                     subAccountName = party.name,
                     paymentMethod = "DEBT"
@@ -3593,10 +3605,10 @@ class DentalViewModel(application: Application) : AndroidViewModel(application) 
     }
 
     /**
-     * پرداخت به ظرف حساب — از هر درگاهی: نقد از صندوق (bankAccountId = صندوق)،
+     * پرداخت به طرف حساب — از هر درگاهی: نقد از صندوق (bankAccountId = صندوق)،
      * کارت/کارت‌خوان (bankAccountId = حساب بانکی)، برداشت پیامک بانکی
      * (sourceSmsNativeId) یا انتقال چک (method = CHEQUE با شمارهٔ چک).
-     * پرداختِ «کلیِ ظرف» (بدون فاکتورِ مشخص) با clinicExpenseId = 0 ثبت می‌شود.
+     * پرداختِ «کلیِ طرف‌حساب» (بدون فاکتورِ مشخص) با clinicExpenseId = 0 ثبت می‌شود.
      */
     fun addPartyPayment(
         party: com.example.data.PartyAccount,
@@ -3632,7 +3644,7 @@ class DentalViewModel(application: Application) : AndroidViewModel(application) 
         }
     }
 
-    /** پرداختِ یک فاکتورِ مشخصِ یک ظرف (مبلغ می‌تواند از ماندهٔ فاکتور بیشتر باشد = بستانکاری). */
+    /** پرداختِ یک فاکتورِ مشخصِ یک طرف‌حساب (مبلغ می‌تواند از ماندهٔ فاکتور بیشتر باشد = بستانکاری). */
     fun payPartyInvoice(
         party: com.example.data.PartyAccount,
         invoice: ClinicExpense,
@@ -3660,10 +3672,10 @@ class DentalViewModel(application: Application) : AndroidViewModel(application) 
     }
 
     /**
-     * انتقال چک به یک ظرف حساب — یک سند واحد: ExpensePayment چکی با partyAccountId.
+     * انتقال چک به یک طرف حساب — یک سند واحد: ExpensePayment چکی با partyAccountId.
      * برخلاف مسیرهای قدیمی، دیگر ClinicExpenseٔ تازه ساخته نمی‌شود و اشاره‌گرِ
      * transferPartyPaymentId روی چک نگه داشته می‌شود تا وصول/برگشت/لغوِ انتقال
-     * اثرش را روی دفتر ظرف برساند.
+     * اثرش را روی دفتر طرف‌حساب برساند.
      */
     fun transferChequeToParty(payment: Payment, party: com.example.data.PartyAccount) {
         if (!authorizeDomain("cheques", "TRANSFER_CHEQUE_EXPENSE")) return
@@ -3738,6 +3750,55 @@ class DentalViewModel(application: Application) : AndroidViewModel(application) 
                     description = desc
                 )
             )
+        }
+    }
+
+    /**
+     * ثبت تراکنش شخصی با همهٔ متغیرها (فرم جدید «هزینه شخصی / درآمد شخصی»):
+     * زیرحساب مقصد، شخصِ اختیاری (حساب اشخاص)، مبلغ، تاریخِ انتخابی از تقویم،
+     * توضیحات و حساب بانکی مرتبط.
+     *
+     * اثر بانکی فقط از خودِ تراکنش می‌آد (personalBankDelta): هزینه موجودی را کم
+     * و درآمد موجودی را زیاد می‌کند. اگر «شخص» انتخاب شده باشد، علاوه بر تراکنشِ
+     * زیرحساب، یک سندِ ریزحسابِ شخص (ChildrenExpense — بدون اثر بانکی) ثبت
+     * می‌شود تا جریاتِ همان شخص در «حساب اشخاص» ظاهر شود (الگوی مشترک با
+     * انتقال چک به شخص) و هیچ سند دوگانهٔ بانکی ساخته نشود.
+     */
+    fun addPersonalTransactionFull(
+        type: String,
+        subAccountName: String,
+        amount: Long,
+        description: String,
+        bankAccountId: Long?,
+        date: Long,
+        personName: String = ""
+    ) {
+        if (amount <= 0L) return
+        if (!authorizeDomain("personal", "ADD_PERSONAL_TRANSACTION")) return
+        viewModelScope.launch {
+            repository.inTransaction {
+                insertTransaction(
+                    PersonalTransaction(
+                        type = type,
+                        subAccountName = subAccountName.trim().ifBlank { if (type == "INCOME") "درآمد شخصی" else "سایر" },
+                        bankAccountId = bankAccountId,
+                        amount = amount,
+                        description = description.trim(),
+                        date = date
+                    )
+                )
+                val person = personName.trim()
+                if (person.isNotBlank()) {
+                    insertChildrenExpense(
+                        ChildrenExpense(
+                            childName = person,
+                            title = description.trim().ifBlank { subAccountName.trim().ifBlank { if (type == "INCOME") "درآمد شخصی" else "هزینه شخصی" } },
+                            amount = amount,
+                            date = date
+                        )
+                    )
+                }
+            }
         }
     }
 
@@ -4284,8 +4345,8 @@ class DentalViewModel(application: Application) : AndroidViewModel(application) 
                                     note = alloc.description
                                 )
                             )
-                            // برداشتِ پیامکی به «ظرف حساب» (طرف‌حسابِ هزینه‌های مطب) —
-                            // پرداختِ کلیِ ظرف بدون نیاز به فاکتورِ مشخص.
+                            // برداشتِ پیامکی به «طرف حساب» (طرف‌حسابِ هزینه‌های مطب) —
+                            // پرداختِ کلیِ طرف‌حساب بدون نیاز به فاکتورِ مشخص.
                             "PARTY" -> repository.insertExpensePayment(
                                 ExpensePayment(
                                     clinicExpenseId = 0L,

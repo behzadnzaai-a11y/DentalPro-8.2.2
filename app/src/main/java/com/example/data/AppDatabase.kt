@@ -831,7 +831,7 @@ interface UnregisteredBankSmsDao {
         PendingSyncOp::class,
         UnregisteredBankSms::class
     ],
-    version = 15, // = AppDatabase.DB_VERSION (باید هم‌مقدار بماند)
+    version = 16, // = AppDatabase.DB_VERSION (باید هم‌مقدار بماند)
     exportSchema = true
 )
 abstract class AppDatabase : RoomDatabase() {
@@ -996,10 +996,10 @@ abstract class AppDatabase : RoomDatabase() {
             }
         }
 
-        // v15: ظرف‌های حساب (طرف‌حساب چندظرفی) — جدول party_accounts + پیوند فاکتور/پرداخت/چک.
+        // v15: طرف‌حساب‌ها (طرف‌حساب چندطرف‌حسابی) — جدول party_accounts + پیوند فاکتور/پرداخت/چک.
         // نام ستون‌ها camelCase است (همان قرارداد Room در بقیهٔ مهاجرت‌ها؛ سینک ابری با
-        // jsonKeysToCamel نگاشت می‌شود). کلینیک‌اکسپنس در مدل جدید «فاکتورِ ظرف» است و
-        // ExpensePayment می‌تواند «پرداختِ کلیِ ظرف» باشد (clinicExpenseId = 0 سنتینل).
+        // jsonKeysToCamel نگاشت می‌شود). کلینیک‌اکسپنس در مدل جدید «فاکتورِ طرف‌حساب» است و
+        // ExpensePayment می‌تواند «پرداختِ کلیِ طرف‌حساب» باشد (clinicExpenseId = 0 سنتینل).
         private val MIGRATION_14_15 = object : androidx.room.migration.Migration(14, 15) {
             override fun migrate(db: androidx.sqlite.db.SupportSQLiteDatabase) {
                 db.execSQL(
@@ -1035,16 +1035,31 @@ abstract class AppDatabase : RoomDatabase() {
             }
         }
 
+        /**
+         * ۱۵ → ۱۶: دو ستون جدید روی personal_sub_accounts برای «حساب اشخاص»:
+         *  - openingBalance: مبلغ اولیه (افتتاحیه) شخص
+         *  - priority: شمارهٔ اولویت نمایش (کوچک‌تر = بالاتر در انتخابگرها)
+         * سینک ابری با EntityMapper/toMap + parsePulledEntity خودکار این ستون‌ها را
+         * هم می‌برد (نگاشت بازتابی)، پس تغییر دیگری لازم نیست.
+         */
+        private val MIGRATION_15_16 = object : androidx.room.migration.Migration(15, 16) {
+            override fun migrate(db: androidx.sqlite.db.SupportSQLiteDatabase) {
+                db.addColumn("personal_sub_accounts", "openingBalance INTEGER NOT NULL DEFAULT 0")
+                db.addColumn("personal_sub_accounts", "priority INTEGER NOT NULL DEFAULT 0")
+            }
+        }
+
         /** فهرستِ واحد و مرتبِ همهٔ مهاجرت‌ها — تنها منبعِ داده‌شده به Room. */
         val ALL_MIGRATIONS: Array<androidx.room.migration.Migration> = arrayOf(
             MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6,
             MIGRATION_6_7, MIGRATION_7_8, MIGRATION_8_9, MIGRATION_9_10, MIGRATION_10_11,
-            MIGRATION_11_12, MIGRATION_12_13, MIGRATION_13_14, MIGRATION_14_15
+            MIGRATION_11_12, MIGRATION_12_13, MIGRATION_13_14, MIGRATION_14_15,
+            MIGRATION_15_16
         )
 
         const val SCHEMA_VERSION = 1
         /** نسخهٔ فعلیِ طرحِ Room — باید با مقدارِ @Database(version=...) هم‌مقدار بماند. */
-        const val DB_VERSION = 15
+        const val DB_VERSION = 16
         private const val DATABASE_NAME = "dental_pro_database"
 
         @Volatile

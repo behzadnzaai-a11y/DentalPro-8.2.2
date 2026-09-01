@@ -237,6 +237,66 @@ object ReportGenerators {
             .build(context, "personal_draw")
     }
 
+    /**
+     * گزارش تراکنش‌های شخصی (هزینه شخصی / درآمد شخصی) — همان قالب یکسان بقیهٔ
+     * گزارش‌ها؛ فیلترها (تاریخ، حساب، شخص) توسط فراخوان اعمال شده و فقط لیستِ
+     * نهاییِ آمادهٔ چاپ اینجا می‌آید.
+     */
+    fun personalTransactionsReport(
+        context: Context, clinicName: String, doctorName: String, accent: Int, currency: String,
+        title: String, periodLabel: String, txs: List<PersonalTransaction>,
+        dateFmt: (Long) -> String, amountFmt: (Long) -> String
+    ): File {
+        val total = txs.sumOf { it.amount }
+        return PdfReportBuilder(clinicName, doctorName, title, periodLabel, accent)
+            .withTable(
+                listOf(
+                    ReportColumn("زیرحساب / شخص", 2.1f),
+                    ReportColumn("توضیحات", 2.1f),
+                    ReportColumn("تاریخ", 1.2f),
+                    ReportColumn("مبلغ", 1.3f)
+                ),
+                txs.sortedBy { it.date }.map {
+                    listOf(
+                        it.subAccountName.ifBlank { "-" },
+                        it.description.ifBlank { "-" },
+                        dateFmt(it.date),
+                        "${amountFmt(it.amount)} $currency"
+                    )
+                }
+            )
+            .withSummaryLine("تعداد تراکنش", txs.size.toString())
+            .withSummaryLine("جمع کل", "${amountFmt(total)} $currency", emphasize = true)
+            .build(context, "personal_tx")
+    }
+
+    /**
+     * گزارش حساب اشخاص به تفکیک بستانکار/بدهکار — شامل مبلغ اولیه (افتتاحیه).
+     * [rows] از سمت فراخوان با همان منطق ماندهٔ «حساب اشخاص» ساخته می‌شود.
+     */
+    fun personsBalancesReport(
+        context: Context, clinicName: String, doctorName: String, accent: Int, currency: String,
+        periodLabel: String, rows: List<PersonBalanceRow>, amountFmt: (Long) -> String
+    ): File {
+        val creditors = rows.filter { it.balance > 0L }
+        val debtors = rows.filter { it.balance < 0L }
+        val tableRows = mutableListOf<List<String>>()
+        creditors.forEach { tableRows.add(listOf(it.name, "بستانکار", amountFmt(it.balance) + " $currency")) }
+        debtors.forEach { tableRows.add(listOf(it.name, "بدهکار", amountFmt(kotlin.math.abs(it.balance)) + " $currency")) }
+        if (tableRows.isEmpty()) tableRows.add(listOf("—", "تسویه", "0 $currency"))
+        return PdfReportBuilder(clinicName, doctorName, "گزارش حساب اشخاص (بستانکار / بدهکار)", periodLabel, accent)
+            .withTable(
+                listOf(ReportColumn("شخص", 2.4f), ReportColumn("ماهیت", 1.2f), ReportColumn("مانده", 1.6f)),
+                tableRows
+            )
+            .withSummaryLine("جمع بستانکاران", "${amountFmt(creditors.sumOf { it.balance })} $currency")
+            .withSummaryLine("جمع بدهکاران", "${amountFmt(debtors.sumOf { -it.balance })} $currency", emphasize = true)
+            .build(context, "persons_balances")
+    }
+
+    /** یک سطر ماندهٔ شخص برای [personsBalancesReport]. */
+    data class PersonBalanceRow(val name: String, val balance: Long)
+
     // #32 — Person accounts report (قبلاً «هزینه‌های فرزندان» — به نام «حساب اشخاص» گزارش می‌شود)
     fun childrenExpenseReport(
         context: Context, clinicName: String, doctorName: String, accent: Int, currency: String,

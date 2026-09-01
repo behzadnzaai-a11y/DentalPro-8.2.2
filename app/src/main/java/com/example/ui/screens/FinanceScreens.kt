@@ -1,5 +1,7 @@
 package com.example.ui.screens
 
+@file:OptIn(androidx.compose.material3.ExperimentalMaterial3Api::class)
+
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -36,10 +38,10 @@ import com.example.ui.DentalViewModel
 // هزینه‌های مطب — چیدمان: (۱) فرمِ «ثبت هزینه جاری مطب»، (۲) «پرداخت هزینه‌ها» زیرِ
 // فرم و بالای صفحه؛ انتخابِ طرف‌حساب از بینِ طرف‌حساب‌های موجود و پرداختِ کل/جزئی.
 /**
- * هابِ «هزینه‌های مطب» در مدل ظرف‌حساب (طرف‌حساب چندظرفی):
+ * هابِ «هزینه‌های مطب» در مدل طرف‌حساب (طرف‌حساب چندطرف‌حسابی):
  * هر بخش (لابراتوار / فنی مهندسی و تعمیرات / فروشگاه مواد دندانپزشکی / جاری / سایر)
- * چند «ظرف حساب» دارد — مثل «لابراتوار آ»، «فنی مهندسی ب»، «فروشگاه آ». فاکتور،
- * پرداخت و چکِ هر ظرف کاملاً جدا ثبت و محاسبه می‌شود و مانده فقط از توالیِ
+ * چند «طرف حساب» دارد — مثل «لابراتوار آ»، «فنی مهندسی ب»، «فروشگاه آ». فاکتور،
+ * پرداخت و چکِ هر طرف‌حساب کاملاً جدا ثبت و محاسبه می‌شود و مانده فقط از توالیِ
  * فاکتورها منهای پرداختی‌ها به‌دست می‌آید (بدون ذخیرهٔ وضعیت تسویه).
  */
 @Composable
@@ -82,7 +84,7 @@ private fun ExpensesHubScreen(
         )
         Text(
             text = t(
-                "یک بخش را انتخاب کنید. هر بخش چند «ظرف حساب» (طرف‌حساب) دارد — مثل «لابراتوار آ»، «فنی مهندسی ب»، «فروشگاه آ». فاکتور، پرداخت و چک هر ظرف کاملاً جدا ثبت و محاسبه می‌شود.",
+                "یک بخش را انتخاب کنید. هر بخش چند «طرف حساب» (طرف‌حساب) دارد — مثل «لابراتوار آ»، «فنی مهندسی ب»، «فروشگاه آ». فاکتور، پرداخت و چک هر طرف‌حساب کاملاً جدا ثبت و محاسبه می‌شود.",
                 "Pick a section. Each section holds multiple party accounts (e.g. Lab A, Eng B, Store A). Invoices, payments and cheques are tracked per party."
             ),
             fontSize = 11.sp,
@@ -200,7 +202,7 @@ private fun PartySectionCard(
                         else -> Color(0xFF2E7D32)
                     }
                 )
-                Text("${t("ظرف‌ها:", "Parties:")} ${if (isPersian) com.example.util.PersianNumberFormatter.toPersianDigits(partyCount.toString()) else partyCount}", fontSize = 9.sp, color = Color.Gray)
+                Text("${t("طرف‌حساب‌ها:", "Parties:")} ${if (isPersian) com.example.util.PersianNumberFormatter.toPersianDigits(partyCount.toString()) else partyCount}", fontSize = 9.sp, color = Color.Gray)
             }
         }
     }
@@ -253,15 +255,24 @@ private fun PartySectionDetailScreen(
                 onClick = { showAddParty = true },
                 contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp)
             ) {
-                Icon(Icons.Default.PersonAdd, contentDescription = null, modifier = Modifier.size(16.dp))
+                Icon(
+                    if (section == PartySection.RUNNING) Icons.Default.Add else Icons.Default.PersonAdd,
+                    contentDescription = null, modifier = Modifier.size(16.dp)
+                )
                 Spacer(Modifier.width(4.dp))
-                Text(t("افزودن ظرف", "Add account"), fontWeight = FontWeight.Bold, fontSize = 11.sp)
+                // به‌درخواست کاربر: در بخشِ «هزینه‌های جاری مطب» دکمه «افزودن طرف حساب» به
+                // «افزودن هزینه» تغییر نام یافت؛ بقیهٔ بخش‌ها «افزودن طرف حساب»اند.
+                Text(
+                    if (section == PartySection.RUNNING) t("افزودن هزینه", "Add expense")
+                    else t("افزودن طرف حساب", "Add party account"),
+                    fontWeight = FontWeight.Bold, fontSize = 11.sp
+                )
             }
         }
 
         Text(
             text = t(
-                "ظرف‌های حساب این بخش — با لمس هر ظرف، دفتر آن (فاکتورها، پرداخت‌ها، چک‌ها و مانده) باز می‌شود:",
+                "طرف‌حساب‌ها این بخش — با لمس هر طرف‌حساب، دفتر آن (فاکتورها، پرداخت‌ها، چک‌ها و مانده) باز می‌شود:",
                 "Party accounts in this section — tap a party to open its ledger:"
             ),
             fontSize = 10.5.sp,
@@ -271,7 +282,7 @@ private fun PartySectionDetailScreen(
         if (sectionParties.isEmpty()) {
             Text(
                 text = t(
-                    "هنوز ظرفی در این بخش ثبت نشده است. با دکمهٔ «افزودن ظرف» اولین طرف‌حساب را بسازید (مثلاً «لابراتوار آ»).",
+                    "هنوز طرف‌حسابی در این بخش ثبت نشده است. با دکمهٔ «افزودن طرف‌حساب» اولین طرف‌حساب را بسازید (مثلاً «لابراتوار آ»).",
                     "No party accounts yet. Use \"Add account\" to create the first one (e.g. Lab A)."
                 ),
                 fontSize = 11.sp,
@@ -298,13 +309,27 @@ private fun PartySectionDetailScreen(
                         horizontalArrangement = Arrangement.SpaceBetween,
                         verticalAlignment = Alignment.CenterVertically
                     ) {
-                        Column(modifier = Modifier.weight(1f)) {
-                            Text(party.displayLabel, fontWeight = FontWeight.Bold, fontSize = 13.sp)
-                            Text(
-                                text = listOfNotNull(party.code.takeIf { it.isNotBlank() }, party.phone.takeIf { it.isNotBlank() }).joinToString(" — "),
-                                fontSize = 9.5.sp,
-                                color = Color.Gray
-                            )
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(6.dp),
+                            modifier = Modifier.weight(1f)
+                        ) {
+                            if (isUtilityParty(party)) {
+                                Icon(
+                                    utilityIconOf(party.name),
+                                    contentDescription = null,
+                                    tint = MaterialTheme.colorScheme.primary,
+                                    modifier = Modifier.size(20.dp)
+                                )
+                            }
+                            Column {
+                                Text(party.displayLabel, fontWeight = FontWeight.Bold, fontSize = 13.sp)
+                                Text(
+                                    text = listOfNotNull(party.code.takeIf { it.isNotBlank() }, party.phone.takeIf { it.isNotBlank() }).joinToString(" — "),
+                                    fontSize = 9.5.sp,
+                                    color = Color.Gray
+                                )
+                            }
                         }
                         Column(horizontalAlignment = Alignment.End) {
                             Text("${formatAmount(ledger.orders)} $currency", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.error)
@@ -351,7 +376,31 @@ private fun PartySectionDetailScreen(
     }
 }
 
-/** دیالوگ افزودن ظرف حساب جدید به یک بخش (مثل «لابراتوار آ»). */
+/**
+ * آیکونِ مرتبطِ هر عنوانِ «هزینه‌های جاری مطب» — اجاره، شارژ ساختمان و قبوض.
+ * بر اساس کلیدواژهٔ عنوان تشخیص داده می‌شود (بدون تغییر دیتابیس).
+ */
+fun utilityIconOf(title: String): androidx.compose.ui.graphics.vector.ImageVector {
+    val t = title.trim()
+    return when {
+        t.contains("اجاره") -> Icons.Default.Home
+        t.contains("شارژ ساختمان") -> Icons.Default.Apartment
+        t.contains("برق") -> Icons.Default.Bolt
+        t.contains("گاز") -> Icons.Default.LocalFireDepartment
+        t.contains("آب") -> Icons.Default.WaterDrop
+        t.contains("تلفن") -> Icons.Default.Phone
+        t.contains("موبایل") -> Icons.Default.Smartphone
+        t.contains("اینترنت") -> Icons.Default.Wifi
+        else -> Icons.Default.ReceiptLong
+    }
+}
+
+/** آیا این طرف‌حسابِ بخشِ جاری، از عناوین استانداردِ اجاره/شارژ/قبض است؟ */
+fun isUtilityParty(party: com.example.data.PartyAccount): Boolean =
+    party.section.trim() == PartySection.RUNNING.key &&
+        listOf("اجاره", "شارژ ساختمان", "قبض").any { party.name.contains(it) }
+
+/** دیالوگ افزودن طرف حساب جدید به یک بخش — با فرم اختصاصیِ هر بخش. */
 @Composable
 private fun AddPartyAccountDialog(
     viewModel: DentalViewModel,
@@ -360,17 +409,66 @@ private fun AddPartyAccountDialog(
     onDismiss: () -> Unit
 ) {
     fun t(fa: String, en: String) = if (isPersian) fa else en
+
+    // ——— فرم اختصاصی هر بخش (درخواست کاربر): فنی مهندسی / لابراتوار / فروشگاه /
+    //     هزینه‌های جاری (اجاره، شارژ و قبوض) — هرکدام با فیلدهای متناسب خودشان ———
     var name by remember { mutableStateOf("") }
     var phone by remember { mutableStateOf("") }
+    var contact by remember { mutableStateOf("") }   // رابط لابراتوار / تخصص فنی
+    var address by remember { mutableStateOf("") }
+    var subcode by remember { mutableStateOf("") }   // کد طرف‌حساب نزد پیمانکار
+    var notes by remember { mutableStateOf("") }
+
+    val runningDefaults = listOf(
+        "اجاره مطب", "شارژ ساختمان مطب", "قبض برق مطب", "قبض گاز مطب",
+        "قبض آب مطب", "قبض تلفن مطب", "قبض موبایل مطب", "قبض اینترنت مطب"
+    )
+
+    val dialogTitle = when (section) {
+        PartySection.RUNNING -> t("افزودن هزینه (هزینه‌های جاری مطب)", "Add expense (running costs)")
+        PartySection.LAB -> t("افزودن لابراتوار", "Add dental lab")
+        PartySection.ENGINEERING -> t("افزودن فنی / تعمیرات", "Add engineering & repair")
+        PartySection.STORE -> t("افزودن فروشگاه مواد دندانپزشکی", "Add dental supply store")
+        else -> t("افزودن طرف حساب", "Add party account")
+    }
+    val nameLabel = when (section) {
+        PartySection.RUNNING -> t("عنوان هزینه (اجاره، شارژ، قبض…)", "Expense title (rent, charge, bills…)")
+        PartySection.LAB -> t("نام لابراتوار", "Lab name")
+        PartySection.ENGINEERING -> t("نام تعمیرگاه / تکنسین", "Workshop / technician name")
+        PartySection.STORE -> t("نام فروشگاه", "Store name")
+        else -> t("نام طرف حساب", "Party name")
+    }
+
+    fun composedNotes(): String = listOf(
+        contact.takeIf { it.isNotBlank() }?.let {
+            when (section) {
+                PartySection.LAB -> "رابط: $it"
+                PartySection.ENGINEERING -> "تخصص: $it"
+                else -> "کد طرف‌حساب: $it"
+            }
+        },
+        subcode.takeIf { it.isNotBlank() && section != PartySection.ENGINEERING }?.let { "کد طرف‌حساب: $it" },
+        address.takeIf { it.isNotBlank() }?.let { "آدرس: $it" },
+        notes.takeIf { it.isNotBlank() }
+    ).filterNotNull().joinToString(" | ")
 
     AlertDialog(
         onDismissRequest = onDismiss,
         title = {
-            Text(t("افزودن ظرف حساب", "Add party account"), fontWeight = FontWeight.Bold, fontSize = 14.sp)
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                Icon(
+                    if (section == PartySection.RUNNING) Icons.Default.ReceiptLong else Icons.Default.PersonAdd,
+                    contentDescription = null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(18.dp)
+                )
+                Text(dialogTitle, fontWeight = FontWeight.Bold, fontSize = 13.sp)
+            }
         },
         text = {
             Column(
-                modifier = Modifier.fillMaxWidth(),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .heightIn(max = 420.dp)
+                    .verticalScroll(rememberScrollState()),
                 verticalArrangement = Arrangement.spacedBy(8.dp)
             ) {
                 Text(
@@ -379,16 +477,87 @@ private fun AddPartyAccountDialog(
                     fontWeight = FontWeight.Bold,
                     color = MaterialTheme.colorScheme.primary
                 )
+
+                // عنوان هزینه — در بخش جاری با پیشنهادِ عناوین استاندارد (با آیکان مرتبط)
                 OutlinedTextField(
                     value = name, onValueChange = { name = it },
-                    label = { Text(t("نام ظرف (مثلاً «آ»، «ب» یا نام طرف‌حساب)", "Account name (e.g. A, B or party name)")) },
+                    label = { Text(nameLabel) },
                     modifier = Modifier.fillMaxWidth(), singleLine = true
                 )
+                if (section == PartySection.RUNNING) {
+                    Text(t("عناوین استاندارد:", "Standard titles:"), fontSize = 10.sp, color = Color.Gray)
+                    Row(
+                        modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
+                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                    ) {
+                        runningDefaults.forEach { title ->
+                            FilterChip(
+                                selected = name.trim() == title,
+                                onClick = { name = title },
+                                label = { Text(title, fontSize = 9.sp) },
+                                leadingIcon = { Icon(utilityIconOf(title), contentDescription = null, modifier = Modifier.size(13.dp)) }
+                            )
+                        }
+                    }
+                }
+
                 OutlinedTextField(
                     value = phone, onValueChange = { phone = it },
                     label = { Text(t("تلفن (اختیاری — برای ارسال صورتحساب)", "Phone (optional — for statements)")) },
                     modifier = Modifier.fillMaxWidth(), singleLine = true
                 )
+
+                when (section) {
+                    PartySection.LAB -> {
+                        OutlinedTextField(
+                            value = contact, onValueChange = { contact = it },
+                            label = { Text(t("نام رابط / تکنسین لابراتوار", "Contact person at the lab")) },
+                            modifier = Modifier.fillMaxWidth(), singleLine = true
+                        )
+                        OutlinedTextField(
+                            value = subcode, onValueChange = { subcode = it },
+                            label = { Text(t("کد لابراتوار نزد شما (اختیاری)", "Your internal lab code (optional)")) },
+                            modifier = Modifier.fillMaxWidth(), singleLine = true
+                        )
+                        OutlinedTextField(
+                            value = address, onValueChange = { address = it },
+                            label = { Text(t("آدرس لابراتوار", "Lab address")) },
+                            modifier = Modifier.fillMaxWidth(), singleLine = true
+                        )
+                    }
+                    PartySection.ENGINEERING -> {
+                        OutlinedTextField(
+                            value = contact, onValueChange = { contact = it },
+                            label = { Text(t("تخصص (تعمیرات یونیت، تجهیزات، تاسیسات…)", "Specialty (dental unit, equipment, facilities…)")) },
+                            modifier = Modifier.fillMaxWidth(), singleLine = true
+                        )
+                        OutlinedTextField(
+                            value = address, onValueChange = { address = it },
+                            label = { Text(t("آدرس / محل سرویس", "Address / service location")) },
+                            modifier = Modifier.fillMaxWidth(), singleLine = true
+                        )
+                    }
+                    PartySection.STORE -> {
+                        OutlinedTextField(
+                            value = contact, onValueChange = { contact = it },
+                            label = { Text(t("نام فروشنده / رابط", "Sales contact")) },
+                            modifier = Modifier.fillMaxWidth(), singleLine = true
+                        )
+                        OutlinedTextField(
+                            value = address, onValueChange = { address = it },
+                            label = { Text(t("آدرس فروشگاه / سایت", "Store address / website")) },
+                            modifier = Modifier.fillMaxWidth(), singleLine = true
+                        )
+                    }
+                    else -> {}
+                }
+
+                OutlinedTextField(
+                    value = notes, onValueChange = { notes = it },
+                    label = { Text(t("یادداشت (اختیاری)", "Notes (optional)")) },
+                    modifier = Modifier.fillMaxWidth(), singleLine = true
+                )
+
                 Text(
                     text = t("پیش‌نمایش: «${partyDisplayLabel(section.faTitle, name.trim())}»", "Preview: \"${partyDisplayLabel(section.faTitle, name.trim())}\""),
                     fontSize = 10.sp,
@@ -399,7 +568,7 @@ private fun AddPartyAccountDialog(
         confirmButton = {
             Button(
                 onClick = {
-                    viewModel.addPartyAccount(section, name, phone)
+                    viewModel.addPartyAccount(section, name, phone, notes = composedNotes())
                     onDismiss()
                 },
                 enabled = name.trim().isNotBlank()
@@ -411,11 +580,11 @@ private fun AddPartyAccountDialog(
     )
 }
 
-/** یک سطر دفتر ظرف: تاریخ، شرح، مبلغ (مثبت = فاکتور، منفی = پرداخت). */
+/** یک سطر دفتر طرف‌حساب: تاریخ، شرح، مبلغ (مثبت = فاکتور، منفی = پرداخت). */
 private data class PartyLedgerRowUi(val date: Long, val label: String, val amount: Long)
 
 /**
- * دفتر یک ظرف حساب — فاکتورها (+) و پرداختی‌ها (−) به‌ترتیب تاریخ با ترازِ تجمعی.
+ * دفتر یک طرف حساب — فاکتورها (+) و پرداختی‌ها (−) به‌ترتیب تاریخ با ترازِ تجمعی.
  * مانده فقط از همین توالی محاسبه می‌شود؛ «تسویه» به‌عنوان وضعیت ذخیره/نمایش داده نمی‌شود.
  */
 @Composable
@@ -535,7 +704,7 @@ private fun PartyLedgerDialog(
 
                 if (rows.isEmpty()) {
                     Text(
-                        text = t("هنوز فاکتور یا پرداختی برای این ظرف ثبت نشده است.", "No invoices or payments for this party yet."),
+                        text = t("هنوز فاکتور یا پرداختی برای این طرف‌حساب ثبت نشده است.", "No invoices or payments for this party yet."),
                         fontSize = 11.sp,
                         color = Color.Gray
                     )
@@ -628,7 +797,7 @@ private fun PartyLedgerDialog(
     }
 }
 
-/** صدور فاکتور برای ظرف — بدون پرداختِ هم‌زمان (خواستهٔ کاربر). */
+/** صدور فاکتور برای طرف‌حساب — بدون پرداختِ هم‌زمان (خواستهٔ کاربر). */
 @Composable
 private fun AddPartyInvoiceDialog(
     viewModel: DentalViewModel,
@@ -640,15 +809,31 @@ private fun AddPartyInvoiceDialog(
     fun t(fa: String, en: String) = if (isPersian) fa else en
     var amountStr by remember { mutableStateOf("") }
     var desc by remember { mutableStateOf("") }
+    var invoiceDate by remember { mutableStateOf(System.currentTimeMillis()) }
+
+    // فرم استانداردِ اختصاصیِ قبوض/اجاره: دوره، شماره اشتراک/شناسه و تاریخ سررسید
+    val isUtility = isUtilityParty(party)
+    var period by remember { mutableStateOf("") }
+    var subscriptionNo by remember { mutableStateOf("") }
+    var dueDate by remember { mutableStateOf(System.currentTimeMillis()) }
 
     AlertDialog(
         onDismissRequest = onDismiss,
         title = {
-            Text(t("صدور فاکتور — ${party.displayLabel}", "Invoice — ${party.displayLabel}"), fontWeight = FontWeight.Bold, fontSize = 13.sp)
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                Icon(
+                    if (isUtility) utilityIconOf(party.name) else Icons.Default.ReceiptLong,
+                    contentDescription = null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(18.dp)
+                )
+                Text(t("صدور فاکتور — ${party.displayLabel}", "Invoice — ${party.displayLabel}"), fontWeight = FontWeight.Bold, fontSize = 13.sp)
+            }
         },
         text = {
             Column(
-                modifier = Modifier.fillMaxWidth(),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .heightIn(max = 440.dp)
+                    .verticalScroll(rememberScrollState()),
                 verticalArrangement = Arrangement.spacedBy(8.dp)
             ) {
                 Text(
@@ -659,12 +844,39 @@ private fun AddPartyInvoiceDialog(
                     fontSize = 10.sp,
                     color = Color.Gray
                 )
-                OutlinedTextField(
-                    value = amountStr, onValueChange = { amountStr = it.filter(Char::isDigit) },
-                    label = { Text("${t("مبلغ فاکتور", "Invoice amount")} ($currency)") },
-                    modifier = Modifier.fillMaxWidth(), singleLine = true
+                if (isUtility) {
+                    OutlinedTextField(
+                        value = period, onValueChange = { period = it },
+                        label = { Text(t("دوره / ماه مصرف (مثلاً ۱۴۰۵/۰۶)", "Period (e.g. 1405/06)")) },
+                        modifier = Modifier.fillMaxWidth(), singleLine = true
+                    )
+                    OutlinedTextField(
+                        value = subscriptionNo, onValueChange = { subscriptionNo = it },
+                        label = { Text(t("شماره اشتراک / شناسه قبض", "Subscription / bill ID")) },
+                        modifier = Modifier.fillMaxWidth(), singleLine = true
+                    )
+                    com.example.ui.components.JalaliDateField(
+                        timestamp = dueDate,
+                        onDateSelected = { dueDate = it },
+                        isPersian = isPersian,
+                        label = t("تاریخ سررسید", "Due date"),
+                        formatDate = { viewModel.formatDate(it) }
+                    )
+                }
+                com.example.ui.components.AmountInputField(
+                    value = amountStr,
+                    onValueChange = { amountStr = it },
+                    label = "${t("مبلغ فاکتور", "Invoice amount")} ($currency)",
+                    currency = currency,
+                    isPersian = isPersian
                 )
-                RealTimeAmountHelper(amountStr, isPersian)
+                com.example.ui.components.JalaliDateField(
+                    timestamp = invoiceDate,
+                    onDateSelected = { invoiceDate = it },
+                    isPersian = isPersian,
+                    label = t("تاریخ فاکتور", "Invoice date"),
+                    formatDate = { viewModel.formatDate(it) }
+                )
                 OutlinedTextField(
                     value = desc, onValueChange = { desc = it },
                     label = { Text(t("شرح (اختیاری)", "Description (optional)")) },
@@ -675,13 +887,20 @@ private fun AddPartyInvoiceDialog(
         confirmButton = {
             Button(
                 onClick = {
-                    val amount = amountStr.trim().toLongOrNull() ?: 0L
+                    val amount = com.example.ui.components.parseGroupedAmount(amountStr)
                     if (amount > 0L) {
-                        viewModel.addPartyInvoice(party, amount, desc.trim())
+                        val details = if (isUtility) {
+                            listOf(
+                                period.takeIf { it.isNotBlank() }?.let { "${t("دوره", "Period")}: $it" },
+                                subscriptionNo.takeIf { it.isNotBlank() }?.let { "${t("شناسه", "ID")}: $it" },
+                                t("سررسید", "Due") + ": " + viewModel.formatDate(dueDate)
+                            ).filterNotNull().joinToString(" | ")
+                        } else ""
+                        viewModel.addPartyInvoice(party, amount, desc.trim(), date = invoiceDate, invoiceDetails = details)
                         onDismiss()
                     }
                 },
-                enabled = (amountStr.trim().toLongOrNull() ?: 0L) > 0L
+                enabled = com.example.ui.components.parseGroupedAmount(amountStr) > 0L
             ) { Text(t("ثبت فاکتور", "Save Invoice"), fontWeight = FontWeight.Bold) }
         },
         dismissButton = {
@@ -691,7 +910,7 @@ private fun AddPartyInvoiceDialog(
 }
 
 /**
- * پرداخت به ظرف حساب — کلیِ ظرف یا روی یک فاکتور مشخص.
+ * پرداخت به طرف حساب — کلیِ طرف‌حساب یا روی یک فاکتور مشخص.
  * روش‌ها: نقدی از صندوق‌ها (bankAccountId = صندوق/تنخواه)، کارت به کارت، کارتخوان (پوز).
  * چک از «انتقال چک» و برداشت پیامک بانکی از همان مسیر پیامک انجام می‌شود.
  */
@@ -709,7 +928,8 @@ private fun PayPartyDialog(
     var amountStr by remember { mutableStateOf("") }
     var method by remember { mutableStateOf("CARD_TRANSFER") }
     var selectedAccountId by remember { mutableStateOf<Long?>(null) }
-    var selectedInvoiceId by remember { mutableStateOf<Long?>(null) } // null = پرداخت کلیِ ظرف
+    var selectedInvoiceId by remember { mutableStateOf<Long?>(null) } // null = پرداخت کلیِ طرف‌حساب
+    var payDate by remember { mutableStateOf(System.currentTimeMillis()) }
 
     AlertDialog(
         onDismissRequest = onDismiss,
@@ -731,7 +951,7 @@ private fun PayPartyDialog(
                     modifier = Modifier.fillMaxWidth().horizontalScrollCompat(),
                     horizontalArrangement = Arrangement.spacedBy(6.dp)
                 ) {
-                    FilterChip(selected = selectedInvoiceId == null, onClick = { selectedInvoiceId = null }, label = { Text(t("کلیِ ظرف", "Whole party"), fontSize = 10.sp) })
+                    FilterChip(selected = selectedInvoiceId == null, onClick = { selectedInvoiceId = null }, label = { Text(t("کلیِ طرف‌حساب", "Whole party"), fontSize = 10.sp) })
                     invoices.take(8).forEach { inv ->
                         FilterChip(
                             selected = selectedInvoiceId == inv.id,
@@ -741,12 +961,20 @@ private fun PayPartyDialog(
                     }
                 }
 
-                OutlinedTextField(
-                    value = amountStr, onValueChange = { amountStr = it.filter(Char::isDigit) },
-                    label = { Text("${t("مبلغ پرداخت", "Amount")} ($currency)") },
-                    modifier = Modifier.fillMaxWidth(), singleLine = true
+                com.example.ui.components.AmountInputField(
+                    value = amountStr,
+                    onValueChange = { amountStr = it },
+                    label = "${t("مبلغ پرداخت", "Amount")} ($currency)",
+                    currency = currency,
+                    isPersian = isPersian
                 )
-                RealTimeAmountHelper(amountStr, isPersian)
+                com.example.ui.components.JalaliDateField(
+                    timestamp = payDate,
+                    onDateSelected = { payDate = it },
+                    isPersian = isPersian,
+                    label = t("تاریخ پرداخت", "Payment date"),
+                    formatDate = { viewModel.formatDate(it) }
+                )
 
                 Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                     listOf(
@@ -798,18 +1026,18 @@ private fun PayPartyDialog(
         confirmButton = {
             Button(
                 onClick = {
-                    val amount = amountStr.trim().toLongOrNull() ?: 0L
+                    val amount = com.example.ui.components.parseGroupedAmount(amountStr)
                     if (amount > 0L) {
                         val inv = invoices.firstOrNull { it.id == selectedInvoiceId }
                         if (inv != null) {
-                            viewModel.payPartyInvoice(party, inv, amount, method, selectedAccountId)
+                            viewModel.payPartyInvoice(party, inv, amount, method, selectedAccountId, date = payDate)
                         } else {
-                            viewModel.addPartyPayment(party, amount, method, selectedAccountId)
+                            viewModel.addPartyPayment(party, amount, method, selectedAccountId, date = payDate)
                         }
                         onDismiss()
                     }
                 },
-                enabled = (amountStr.trim().toLongOrNull() ?: 0L) > 0L
+                enabled = com.example.ui.components.parseGroupedAmount(amountStr) > 0L
             ) { Text(t("ثبت پرداخت", "Pay"), fontWeight = FontWeight.Bold) }
         },
         dismissButton = {
@@ -818,7 +1046,7 @@ private fun PayPartyDialog(
     )
 }
 
-/** انتخاب چکِ قابل‌انتقال (در جریان وصول) و انتقال آن به این ظرف — با اثرِ حسابداری. */
+/** انتخاب چکِ قابل‌انتقال (در جریان وصول) و انتقال آن به این طرف‌حساب — با اثرِ حسابداری. */
 @Composable
 private fun PickChequeForPartyDialog(
     viewModel: DentalViewModel,
@@ -847,7 +1075,7 @@ private fun PickChequeForPartyDialog(
                 if (transferable.isEmpty()) {
                     Text(
                         text = t(
-                            "چکِ قابل انتقالی (در جریان وصول) وجود ندارد. چک‌ها از «مدیریت چک‌های صیادی» به همین ظرف قابل انتقال‌اند.",
+                            "چکِ قابل انتقالی (در جریان وصول) وجود ندارد. چک‌ها از «مدیریت چک‌های صیادی» به همین طرف‌حساب قابل انتقال‌اند.",
                             "No transferable (in-progress) cheques. Transfer happens from the Sayad cheques manager to this party."
                         ),
                         fontSize = 11.sp,
@@ -879,7 +1107,7 @@ private fun PickChequeForPartyDialog(
                 }
                 Text(
                     text = t(
-                        "با انتقال، مبلغ چک بلافاصله به‌عنوان پرداختِ همین ظرف در دفتر ثبت می‌شود و وضعیت چک «انتقال یافته» می‌گیرد.",
+                        "با انتقال، مبلغ چک بلافاصله به‌عنوان پرداختِ همین طرف‌حساب در دفتر ثبت می‌شود و وضعیت چک «انتقال یافته» می‌گیرد.",
                         "On transfer, the cheque amount is posted immediately to this party's ledger and the cheque becomes \"Transferred\"."
                     ),
                     fontSize = 10.sp,
@@ -1151,51 +1379,74 @@ fun PersonalScreen(viewModel: DentalViewModel) {
     val transactions by viewModel.personalTransactions.collectAsStateWithLifecycle()
     val bankAccounts by viewModel.bankAccounts.collectAsStateWithLifecycle()
     val subAccounts by viewModel.personalSubAccounts.collectAsStateWithLifecycle()
+    val personProfiles by viewModel.personProfiles.collectAsStateWithLifecycle()
+    val childrenExpenses by viewModel.childrenExpenses.collectAsStateWithLifecycle()
     val currency = viewModel.label("currency")
 
     fun t(fa: String, en: String) = if (isPersian) fa else en
 
+    // دفتر تمام‌صفحهٔ لینک‌شده به کادرهای بالای صفحه (هزینه / درآمد / اشخاص)
+    var ledgerMode by remember { mutableStateOf<String?>(null) }
+
     var showForm by remember { mutableStateOf(false) }
     var showManageSubAccounts by remember { mutableStateOf(false) }
     var showPersonsDialog by remember { mutableStateOf(false) }
-    var txToEdit by remember { mutableStateOf<PersonalTransaction?>(null) }
-    var txToDelete by remember { mutableStateOf<PersonalTransaction?>(null) }
 
-    var type by remember { mutableStateOf("DRAW") }
-    var subAccount by remember { mutableStateOf(if (isPersian) "سایر" else "Other") }
+    // ——— وضعیت فرم جدید (طبق درخواست کاربر) ———
+    // «تراکنش جدید برداشت از مطب» حذف شد؛ فقط هزینه شخصی (راست) و درآمد شخصی.
+    var type by remember { mutableStateOf("EXPENSE") }
+    // فیلد ۱: کشوی حساب‌های ستاره‌دار
+    var starredPick by remember { mutableStateOf<String?>(null) }
+    var starredExpanded by remember { mutableStateOf(false) }
+    // فیلد ۲: فیلد آزاد با اتوکامپلت (به پایین فیلد جدید منتقل شد)
+    var subAccount by remember { mutableStateOf("") }
     var subAccountExpanded by remember { mutableStateOf(false) }
+    // فیلد ۳: کشوی حساب اشخاص
+    var personPick by remember { mutableStateOf<String?>(null) }
+    // فیلد ۴ به بعد: مبلغ / تاریخ / توضیحات / حساب بانکی
     var amountStr by remember { mutableStateOf("") }
+    var txDate by remember { mutableStateOf(System.currentTimeMillis()) }
     var desc by remember { mutableStateOf("") }
     var selectedAccountId by remember { mutableStateOf<Long?>(null) }
 
-    // فقط «حساب»‌ها (برگ‌های درخت) در تراکنش‌ها شرکت می‌کنند: گره‌ای که نامش والدِ
-    // کسی نیست (نه parentName و نه grandParentNameِ گرهٔ دیگری). سرشاخه/شاخه‌ها که
-    // صرفاً گروه‌بندی‌اند از فهرستِ انتخاب کنار گذاشته می‌شوند.
+    // فقط «زیرحساب»ها (برگ‌های درخت) در تراکنش‌ها شرکت می‌کنند — سرفصل/حساب‌های
+    // صرفاً گروه‌بندی از فهرست انتخاب کنار گذاشته می‌شوند.
     val distinctSubs = remember(subAccounts) {
-        val alive = subAccounts.filter { !it.isDeleted }
+        val alive = subAccounts.filter { !it.isDeleted && it.category != com.example.data.PERSONS_CATEGORY }
         val usedAsParent = (alive.map { it.parentName.trim() } + alive.map { it.grandParentName.trim() })
             .filter { it.isNotBlank() }.toSet()
         alive
             .filter { it.name.trim() !in usedAsParent }
             .distinctBy { "${it.category.trim()}|${it.grandParentName.trim()}|${it.parentName.trim()}|${it.name.trim()}" }
     }
-    fun displayNameOf(sub: PersonalSubAccount): String =
+    fun displayNameOf(sub: com.example.data.PersonalSubAccount): String =
         listOf(sub.grandParentName.trim(), sub.parentName.trim(), sub.name.trim())
             .filter { it.isNotBlank() }
             .joinToString(" - ")
     val starredSubs = remember(distinctSubs) { distinctSubs.filter { it.isQuickSelect } }
-    val restSubs = remember(distinctSubs) { distinctSubs.filter { !it.isQuickSelect } }
+    val incomeSubs = remember(distinctSubs) { distinctSubs.filter { it.category == "INCOME" } }
 
-    val active = transactions.filter { !it.isDeleted }.sortedByDescending { it.date }
+    // اشخاصِ انتخاب‌پذیر در فیلد ۳ — ستاره‌دار/اولویت‌دار اول لیست
+    val personNames = remember(personProfiles) {
+        personProfiles
+            .sortedWith(
+                compareByDescending<com.example.data.PersonProfile> { it.isStarred }
+                    .thenBy { it.priority }
+                    .thenBy { it.fullName }
+            )
+            .map { it.fullName }
+    }
+
+    val active = transactions.filter { !it.isDeleted }
     val totalIncome = active.filter { it.type == "INCOME" }.sumOf { it.amount }
-    val totalDraw = active.filter { it.type == "DRAW" }.sumOf { it.amount }
     val totalExpense = active.filter { it.type == "EXPENSE" }.sumOf { it.amount }
+    val personsCount = personNames.size + childrenExpenses.filter { !it.isDeleted && it.childName.isNotBlank() }
+        .map { it.childName.trim() }.distinct().count()
 
     Column(
         modifier = Modifier.fillMaxSize().padding(12.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp)
     ) {
-        // «تراکنش جدید» طبق درخواست کاربر به یک سطر بالاتر و به‌صورت تمام‌عرض منتقل شد.
         Button(
             onClick = { showForm = !showForm },
             modifier = Modifier.fillMaxWidth(),
@@ -1232,14 +1483,17 @@ fun PersonalScreen(viewModel: DentalViewModel) {
             }
         }
 
+        // ——— سه کادر بالای صفحه ———
+        // «برداشت از مطب» → «اشخاص» تغییر یافت و به دفتر تمام‌صفحهٔ حساب اشخاص لینک شد.
+        // کادر هزینه و درآمد هم به دفاتر تمام‌صفحهٔ خودشان لینک می‌شوند (فیلتر + گزارش PDF).
         Card(modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(14.dp)) {
             Row(
                 modifier = Modifier.padding(12.dp),
                 horizontalArrangement = Arrangement.spacedBy(8.dp)
             ) {
-                PersonalKpi(t("درآمد", "Income"), totalIncome, Color(0xFF2E7D32), currency, Modifier.weight(1f))
-                PersonalKpi(t("برداشت", "Draw"), totalDraw, MaterialTheme.colorScheme.primary, currency, Modifier.weight(1f))
-                PersonalKpi(t("هزینه", "Expense"), totalExpense, MaterialTheme.colorScheme.error, currency, Modifier.weight(1f))
+                PersonalKpiLink(t("هزینه", "Expense"), totalExpense, MaterialTheme.colorScheme.error, currency, Modifier.weight(1f)) { ledgerMode = "EXPENSE" }
+                PersonalKpiLink(t("درآمد", "Income"), totalIncome, Color(0xFF2E7D32), currency, Modifier.weight(1f)) { ledgerMode = "INCOME" }
+                PersonalKpiLinkCount(t("اشخاص", "Persons"), personsCount, MaterialTheme.colorScheme.primary, Modifier.weight(1f)) { ledgerMode = "PERSONS" }
             }
         }
 
@@ -1250,73 +1504,107 @@ fun PersonalScreen(viewModel: DentalViewModel) {
                 border = BorderStroke(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.4f))
             ) {
                 Column(
-                    modifier = Modifier.padding(12.dp),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .verticalScroll(rememberScrollState())
+                        .padding(12.dp),
                     verticalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
+                    // «برداشت از مطب» حذف شد؛ هزینه شخصی به سمت راست منتقل شد.
                     Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                         listOf(
-                            "DRAW" to t("برداشت از مطب", "Draw"),
-                            "INCOME" to t("درآمد شخصی", "Income"),
-                            "EXPENSE" to t("هزینه شخصی", "Expense")
+                            "EXPENSE" to t("هزینه شخصی", "Personal Expense"),
+                            "INCOME" to t("درآمد شخصی", "Personal Income")
                         ).forEach { (key, labelTxt) ->
                             FilterChip(
                                 selected = type == key,
-                                onClick = { type = key },
+                                onClick = {
+                                    type = key
+                                    // تغییر نوع، انتخاب‌های وابسته به نوع را پاک می‌کند
+                                    personPick = null
+                                },
                                 label = { Text(labelTxt, fontSize = 10.sp) },
                                 modifier = Modifier.weight(1f)
                             )
                         }
                     }
-                    // سرفصل‌های ستاردار (اولویت پیشنهادی) — با یک لمس انتخاب می‌شوند
-                    if (starredSubs.isNotEmpty()) {
-                        Text(
-                            text = t("⭐ اولویت پیشنهادی (ستاردار):", "⭐ Priority (starred):"),
-                            fontSize = 10.sp,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                        Row(
-                            modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
-                            horizontalArrangement = Arrangement.spacedBy(6.dp)
+
+                    // ——— فیلد ۱: کشوی حساب‌های ستاره‌دار (فقط هزینه شخصی) ———
+                    // لمسِ این فیلد، فیلدِ آزادِ پایین را غیرفعال می‌کند (و برعکس).
+                    if (type == "EXPENSE" && starredSubs.isNotEmpty()) {
+                        ExposedDropdownMenuBox(
+                            expanded = starredExpanded && subAccount.isBlank(),
+                            onExpandedChange = { if (subAccount.isBlank()) starredExpanded = it },
+                            modifier = Modifier.fillMaxWidth()
                         ) {
-                            starredSubs.forEach { sub ->
-                                val dn = displayNameOf(sub)
-                                FilterChip(
-                                    selected = subAccount == dn,
-                                    onClick = { subAccount = dn },
-                                    label = { Text(dn, fontSize = 10.sp, maxLines = 1) },
-                                    leadingIcon = {
-                                        Icon(Icons.Default.Star, contentDescription = null, modifier = Modifier.size(14.dp), tint = Color(0xFFF9A825))
-                                    }
-                                )
+                            OutlinedTextField(
+                                value = starredPick ?: t("انتخاب نشده", "Not selected"),
+                                onValueChange = { },
+                                readOnly = true,
+                                enabled = subAccount.isBlank(),
+                                label = { Text(t("حساب ستاره‌دار (انتخاب از علاقه‌مندی‌ها)", "Starred account"), fontSize = 11.sp) },
+                                trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = starredExpanded && subAccount.isBlank()) },
+                                modifier = Modifier.menuAnchor().fillMaxWidth(),
+                                singleLine = true
+                            )
+                            ExposedDropdownMenu(
+                                expanded = starredExpanded && subAccount.isBlank(),
+                                onDismissRequest = { starredExpanded = false }
+                            ) {
+                                starredSubs.forEach { sub ->
+                                    val dn = displayNameOf(sub)
+                                    DropdownMenuItem(
+                                        text = { Text(dn, fontSize = 12.sp) },
+                                        leadingIcon = { Icon(Icons.Default.Star, contentDescription = null, tint = Color(0xFFF9A825), modifier = Modifier.size(14.dp)) },
+                                        onClick = {
+                                            // لمس یکی، دیگری را غیرفعال/پاک می‌کند
+                                            starredPick = dn
+                                            subAccount = ""
+                                            starredExpanded = false
+                                        }
+                                    )
+                                }
                             }
                         }
                     }
-                    // بقیه‌ی سرفصل‌ها — در فیلد کشویی، قابل انتخاب (و همچنان قابل تایپ آزاد)
-                    @OptIn(ExperimentalMaterial3Api::class)
+
+                    // ——— فیلد ۲ (به پایین فیلد جدید منتقل شد): حساب با اتوکامپلت حین تایپ ———
+                    val suggestionBase = if (type == "INCOME") incomeSubs else distinctSubs
+                    val suggestions = remember(subAccount, suggestionBase, type) {
+                        val q = subAccount.trim()
+                        if (q.isBlank()) suggestionBase.map(::displayNameOf)
+                        else suggestionBase.map(::displayNameOf).filter { it.contains(q, ignoreCase = true) }
+                    }
                     ExposedDropdownMenuBox(
-                        expanded = subAccountExpanded,
-                        onExpandedChange = { subAccountExpanded = it },
+                        expanded = subAccountExpanded && starredPick == null && suggestions.isNotEmpty(),
+                        onExpandedChange = { },
                         modifier = Modifier.fillMaxWidth()
                     ) {
                         OutlinedTextField(
-                            value = subAccount, onValueChange = { subAccount = it },
-                            label = { Text(t("سرفصل (از لیست انتخاب کنید یا تایپ کنید)", "Ledger head (pick or type)")) },
-                            trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = subAccountExpanded) },
+                            value = subAccount,
+                            onValueChange = {
+                                subAccount = it
+                                // تایپ در این فیلد، انتخاب فیلد ستاره‌دار را غیرفعال می‌کند
+                                if (it.isNotBlank()) starredPick = null
+                                subAccountExpanded = true
+                            },
+                            enabled = starredPick == null,
+                            label = {
+                                Text(
+                                    if (type == "INCOME") t("نوع درآمد (اتوکامپلت — تایپ کنید یا انتخاب کنید)", "Income type (autocomplete)")
+                                    else t("حساب شخصی (اتوکامپلت — تایپ کنید یا انتخاب کنید)", "Personal account (autocomplete)"),
+                                    fontSize = 11.sp
+                                )
+                            },
+                            trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = subAccountExpanded && starredPick == null) },
                             modifier = Modifier.menuAnchor().fillMaxWidth(),
                             singleLine = true
                         )
                         ExposedDropdownMenu(
-                            expanded = subAccountExpanded,
+                            expanded = subAccountExpanded && starredPick == null && suggestions.isNotEmpty(),
                             onDismissRequest = { subAccountExpanded = false }
                         ) {
-                            if (restSubs.isEmpty()) {
-                                DropdownMenuItem(
-                                    text = { Text(t("سرفصل دیگری ثبت نشده — نام دلخواه را تایپ کنید", "No more headings — type one"), fontSize = 11.sp, color = Color.Gray) },
-                                    onClick = { subAccountExpanded = false }
-                                )
-                            }
-                            restSubs.forEach { sub ->
-                                val dn = displayNameOf(sub)
+                            suggestions.take(12).forEach { dn ->
                                 DropdownMenuItem(
                                     text = { Text(dn, fontSize = 12.sp) },
                                     onClick = { subAccount = dn; subAccountExpanded = false }
@@ -1324,19 +1612,70 @@ fun PersonalScreen(viewModel: DentalViewModel) {
                             }
                         }
                     }
-                    OutlinedTextField(
-                        value = amountStr, onValueChange = { amountStr = it.filter(Char::isDigit) },
-                        label = { Text("${t("مبلغ", "Amount")} ($currency)") },
-                        modifier = Modifier.fillMaxWidth(), singleLine = true
+
+                    // ——— فیلد ۳: کشوی حساب اشخاص (فقط هزینه شخصی؛ اختیاری) ———
+                    if (type == "EXPENSE" && personNames.isNotEmpty()) {
+                        var personExpandedLocal by remember { mutableStateOf(false) }
+                        ExposedDropdownMenuBox(
+                            expanded = personExpandedLocal,
+                            onExpandedChange = { personExpandedLocal = it },
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            OutlinedTextField(
+                                value = personPick ?: "",
+                                onValueChange = { },
+                                readOnly = true,
+                                label = { Text(t("حساب اشخاص (اختیاری — تراکنش به نام شخص ثبت می‌شود)", "Person account (optional)"), fontSize = 11.sp) },
+                                trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = personExpandedLocal) },
+                                modifier = Modifier.menuAnchor().fillMaxWidth(),
+                                singleLine = true
+                            )
+                            ExposedDropdownMenu(expanded = personExpandedLocal, onDismissRequest = { personExpandedLocal = false }) {
+                                DropdownMenuItem(
+                                    text = { Text(t("بدون شخص", "No person"), fontSize = 11.sp, color = Color.Gray) },
+                                    onClick = { personPick = null; personExpandedLocal = false }
+                                )
+                                personNames.forEach { name ->
+                                    DropdownMenuItem(
+                                        text = { Text(name, fontSize = 12.sp) },
+                                        onClick = { personPick = name; personExpandedLocal = false }
+                                    )
+                                }
+                            }
+                        }
+                    }
+
+                    // ——— فیلد ۴: مبلغ — کیبورد عددی + جداکنندهٔ ۳رقمی زنده + حروفی قرمز ———
+                    com.example.ui.components.AmountInputField(
+                        value = amountStr,
+                        onValueChange = { amountStr = it },
+                        label = "${t("مبلغ", "Amount")} ($currency)",
+                        currency = currency,
+                        isPersian = isPersian
                     )
-                    RealTimeAmountHelper(amountStr, isPersian)
+
+                    // ——— فیلد ۵: تاریخ تراکنش با تقویم انتخابی نرم‌افزار ———
+                    com.example.ui.components.JalaliDateField(
+                        timestamp = txDate,
+                        onDateSelected = { txDate = it },
+                        isPersian = isPersian,
+                        label = t("تاریخ تراکنش", "Transaction date"),
+                        formatDate = { viewModel.formatDate(it) }
+                    )
+
+                    // ——— فیلد ۶: توضیحات ———
                     OutlinedTextField(
                         value = desc, onValueChange = { desc = it },
                         label = { Text(t("توضیحات", "Description")) },
                         modifier = Modifier.fillMaxWidth(), singleLine = true
                     )
+
                     if (bankAccounts.isNotEmpty()) {
-                        Text(t("حساب بانکی مرتبط (اختیاری):", "Related bank account (optional):"), fontSize = 10.sp, color = Color.Gray)
+                        Text(
+                            if (type == "INCOME") t("حساب مقصد (موجودی را افزایش می‌دهد):", "Destination account (increases balance):")
+                            else t("حساب بانکی مرتبط (موجودی را کم می‌کند):", "Related bank account (decreases balance):"),
+                            fontSize = 10.sp, color = Color.Gray
+                        )
                         Row(
                             modifier = Modifier.fillMaxWidth().horizontalScrollCompat(),
                             horizontalArrangement = Arrangement.spacedBy(6.dp)
@@ -1355,82 +1694,46 @@ fun PersonalScreen(viewModel: DentalViewModel) {
                             }
                         }
                     }
+
+                    val amountValue = com.example.ui.components.parseGroupedAmount(amountStr)
+                    val accountChosen = if (type == "EXPENSE") (starredPick != null || subAccount.isNotBlank()) else subAccount.isNotBlank()
                     Button(
                         onClick = {
-                            val amount = amountStr.trim().toLongOrNull() ?: 0L
-                            if (amount > 0) {
-                                viewModel.addPersonalTxDetailed(
+                            if (amountValue > 0L && accountChosen) {
+                                viewModel.addPersonalTransactionFull(
                                     type = type,
-                                    subAccountName = subAccount.trim().ifBlank { if (isPersian) "سایر" else "Other" },
+                                    subAccountName = starredPick ?: subAccount.trim(),
+                                    amount = amountValue,
+                                    description = desc.trim(),
                                     bankAccountId = selectedAccountId,
-                                    amount = amount,
-                                    desc = desc.trim()
+                                    date = txDate,
+                                    personName = personPick.orEmpty()
                                 )
-                                amountStr = ""; desc = ""
+                                amountStr = ""; desc = ""; starredPick = null; subAccount = ""; personPick = null
+                                txDate = System.currentTimeMillis()
                                 showForm = false
                             }
                         },
                         modifier = Modifier.fillMaxWidth(),
-                        enabled = (amountStr.trim().toLongOrNull() ?: 0L) > 0
+                        enabled = amountValue > 0L && accountChosen
                     ) { Text(t("ثبت تراکنش", "Save Transaction"), fontWeight = FontWeight.Bold) }
                 }
             }
         }
 
-        LazyColumn(
-            verticalArrangement = Arrangement.spacedBy(8.dp),
-            modifier = Modifier.weight(1f)
-        ) {
-            items(active, key = { it.id }) { tx ->
-                val color = when (tx.type) {
-                    "INCOME" -> Color(0xFF2E7D32)
-                    "DRAW" -> MaterialTheme.colorScheme.primary
-                    else -> MaterialTheme.colorScheme.error
-                }
-                Card(modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(12.dp)) {
-                    Row(
-                        modifier = Modifier.padding(10.dp),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Column(modifier = Modifier.weight(1f)) {
-                            Text(tx.subAccountName.ifBlank { t("سایر", "Other") }, fontWeight = FontWeight.Bold, fontSize = 12.sp)
-                            Text(
-                                text = listOfNotNull(
-                                    tx.description.takeIf { it.isNotBlank() },
-                                    viewModel.formatDate(tx.date)
-                                ).joinToString(" — "),
-                                fontSize = 10.sp,
-                                color = Color.Gray,
-                                maxLines = 2,
-                                overflow = TextOverflow.Ellipsis
-                            )
-                        }
-                        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                            Text(
-                                text = "${if (tx.type == "EXPENSE" || tx.type == "DRAW") "-" else "+"}${formatAmount(tx.amount)} $currency",
-                                fontWeight = FontWeight.ExtraBold,
-                                fontSize = 12.sp,
-                                color = color
-                            )
-                            IconButton(
-                                onClick = { txToEdit = tx },
-                                modifier = Modifier.size(28.dp)
-                            ) {
-                                Icon(Icons.Default.Edit, contentDescription = "Edit", tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(15.dp))
-                            }
-                            IconButton(
-                                onClick = { txToDelete = tx },
-                                modifier = Modifier.size(28.dp)
-                            ) {
-                                Icon(Icons.Default.Delete, contentDescription = "Delete", tint = MaterialTheme.colorScheme.error, modifier = Modifier.size(15.dp))
-                            }
-                        }
-                    }
-                }
-            }
-            item { Spacer(Modifier.height(12.dp)) }
-        }
+        // لیست تراکنش‌های قبلی از این صفحه حذف شد و به کادرهای بالا لینک شد:
+        Text(
+            text = t(
+                "لیست کامل تراکنش‌ها به کادرهای بالا منتقل شد — با لمس هر کادر، دفترِ تمام‌صفحه با فیلتر تاریخ/شخص/حساب و گزارش PDF باز می‌شود.",
+                "The full transaction list moved to the top boxes — tap a box to open the full-screen ledger with date/person/account filters and a PDF report."
+            ),
+            fontSize = 10.5.sp,
+            color = Color.Gray
+        )
+    }
+
+    if (ledgerMode != null) {
+        PersonalLedgerFullScreen(viewModel = viewModel, mode = ledgerMode!!, onDismiss = { ledgerMode = null })
     }
 
     if (showManageSubAccounts) {
@@ -1448,41 +1751,49 @@ fun PersonalScreen(viewModel: DentalViewModel) {
             onDismiss = { showPersonsDialog = false }
         )
     }
+}
 
-    if (txToEdit != null) {
-        EditPersonalTxDialog(
-            tx = txToEdit!!,
-            bankAccounts = bankAccounts.filter { !it.isDeleted },
-            currency = currency,
-            isPersian = isPersian,
-            viewModel = viewModel,
-            onDismiss = { txToEdit = null }
-        )
+/** کادر KPI قابل‌لمس (مبلغ) — لینک به دفتر تمام‌صفحه. */
+@Composable
+private fun PersonalKpiLink(title: String, value: Long, color: Color, currency: String, modifier: Modifier = Modifier, onClick: () -> Unit) {
+    Surface(
+        onClick = onClick,
+        modifier = modifier,
+        shape = RoundedCornerShape(10.dp),
+        color = color.copy(alpha = 0.10f),
+        border = BorderStroke(1.dp, color.copy(alpha = 0.3f))
+    ) {
+        Column(modifier = Modifier.padding(8.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+            Text(title, fontSize = 10.sp, fontWeight = FontWeight.Bold, color = color)
+            Text(formatAmount(value), fontSize = 11.sp, fontWeight = FontWeight.ExtraBold, color = color)
+            Text(currency, fontSize = 8.5.sp, color = color.copy(alpha = 0.8f))
+        }
     }
+}
 
-    if (txToDelete != null) {
-        AlertDialog(
-            onDismissRequest = { txToDelete = null },
-            title = { Text(t("حذف تراکنش شخصی", "Delete Transaction"), fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.error) },
-            text = { Text(t("آیا از حذف این تراکنش به مبلغ ${formatAmount(txToDelete!!.amount)} $currency اطمینان دارید؟", "Delete transaction for ${formatAmount(txToDelete!!.amount)} $currency?")) },
-            confirmButton = {
-                Button(
-                    onClick = {
-                        viewModel.deletePersonalTx(txToDelete!!)
-                        txToDelete = null
-                    },
-                    colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error)
-                ) { Text(t("حذف", "Delete"), fontWeight = FontWeight.Bold) }
-            },
-            dismissButton = {
-                TextButton(onClick = { txToDelete = null }) { Text(t("انصراف", "Cancel")) }
-            }
-        )
+/** کادر KPI قابل‌لمس (شمارنده) — لینک به دفتر تمام‌صفحهٔ اشخاص. */
+@Composable
+private fun PersonalKpiLinkCount(title: String, count: Int, color: Color, modifier: Modifier = Modifier, onClick: () -> Unit) {
+    Surface(
+        onClick = onClick,
+        modifier = modifier,
+        shape = RoundedCornerShape(10.dp),
+        color = color.copy(alpha = 0.10f),
+        border = BorderStroke(1.dp, color.copy(alpha = 0.3f))
+    ) {
+        Column(modifier = Modifier.padding(8.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+            Text(title, fontSize = 10.sp, fontWeight = FontWeight.Bold, color = color)
+            Text(
+                if (count > 0) count.toString() else "—",
+                fontSize = 13.sp, fontWeight = FontWeight.ExtraBold, color = color
+            )
+            Text("👥", fontSize = 8.5.sp)
+        }
     }
 }
 
 @Composable
-private fun EditPersonalTxDialog(
+fun EditPersonalTxDialog(
     tx: PersonalTransaction,
     bankAccounts: List<BankAccount>,
     currency: String,
@@ -1590,22 +1901,6 @@ private fun EditPersonalTxDialog(
             }
         }
     )
-}
-
-@Composable
-private fun PersonalKpi(title: String, value: Long, color: Color, currency: String, modifier: Modifier = Modifier) {
-    Surface(
-        modifier = modifier,
-        shape = RoundedCornerShape(10.dp),
-        color = color.copy(alpha = 0.10f),
-        border = BorderStroke(1.dp, color.copy(alpha = 0.3f))
-    ) {
-        Column(modifier = Modifier.padding(8.dp), horizontalAlignment = Alignment.CenterHorizontally) {
-            Text(title, fontSize = 10.sp, fontWeight = FontWeight.Bold, color = color)
-            Text(formatAmount(value), fontSize = 11.sp, fontWeight = FontWeight.ExtraBold, color = color)
-            Text(currency, fontSize = 8.5.sp, color = color.copy(alpha = 0.8f))
-        }
-    }
 }
 
 // ==========================================
@@ -1777,6 +2072,10 @@ fun PersonsAccountsDialog(
     var newLastName by remember { mutableStateOf("") }
     var newTitle by remember { mutableStateOf("") }
     var newNature by remember { mutableStateOf(PersonNature.DEBTOR) }
+    // مبلغ اولیه (افتتاحیه) + ستاره + شمارهٔ اولویت — طبق درخواست کاربر
+    var newOpeningStr by remember { mutableStateOf("") }
+    var newPriorityStr by remember { mutableStateOf("") }
+    var newStarred by remember { mutableStateOf(false) }
     var editingPersonId by remember { mutableStateOf(0L) }
 
     var justAdded by remember { mutableStateOf<String?>(null) }
@@ -1785,6 +2084,7 @@ fun PersonsAccountsDialog(
     fun resetPersonForm() {
         newFirstName = ""; newLastName = ""; newTitle = ""
         newNature = PersonNature.DEBTOR; editingPersonId = 0L
+        newOpeningStr = ""; newPriorityStr = ""; newStarred = false
     }
 
     // جریات هر شخص — سندهای یکتا و مرتب‌شده بر اساس تاریخ
@@ -1816,12 +2116,19 @@ fun PersonsAccountsDialog(
 
     // لیست اشخاص: پرونده‌های ثبت‌شده + نام‌های قدیمی تنظیمات + سوابق تراکنش‌ها
     val personNames = remember(settings, personRecords, personProfiles) {
+        // ستاره‌دارها اول، بعد شمارهٔ اولویت (کوچک‌تر = بالاتر)، بعد الفبایی
         (personProfiles.map { it.fullName } +
             settings.childrenNames.split(",", "،").map { it.trim() }.filter { it.isNotBlank() } +
             personRecords.keys)
             .filter { it.isNotBlank() }
             .distinctBy { it.trim().lowercase() }
-            .sorted()
+            .sortedWith(
+                compareByDescending<String> { name ->
+                    personProfiles.firstOrNull { it.fullName.equals(name, ignoreCase = true) }?.isStarred == true
+                }.thenBy { name ->
+                    personProfiles.firstOrNull { it.fullName.equals(name, ignoreCase = true) }?.priority ?: 0
+                }.thenBy { it }
+            )
     }
 
     AlertDialog(
@@ -1917,6 +2224,34 @@ fun PersonsAccountsDialog(
                                 }
                             }
 
+                            // ——— مبلغ اولیه (افتتاحیه) + اولویت + ستاره ———
+                            com.example.ui.components.AmountInputField(
+                                value = newOpeningStr,
+                                onValueChange = { newOpeningStr = it },
+                                label = t("مبلغ اولیه (افتتاحیه)", "Opening balance"),
+                                currency = currency,
+                                isPersian = isPersian
+                            )
+                            OutlinedTextField(
+                                value = newPriorityStr,
+                                onValueChange = { newPriorityStr = it.filter(Char::isDigit).take(3) },
+                                label = { Text(t("شمارهٔ اولویت (کوچک‌تر = اول لیست‌ها)", "Priority (lower = first)"), fontSize = 10.sp) },
+                                modifier = Modifier.fillMaxWidth(), singleLine = true
+                            )
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(4.dp)
+                            ) {
+                                IconButton(onClick = { newStarred = !newStarred }) {
+                                    Icon(
+                                        if (newStarred) Icons.Default.Star else Icons.Default.StarBorder,
+                                        contentDescription = t("ستاره‌دار", "Starred"),
+                                        tint = if (newStarred) Color(0xFFF9A825) else Color.Gray,
+                                        modifier = Modifier.size(18.dp)
+                                    )
+                                }
+                                Text(t("ستاره‌دار — در تراکنش‌ها اول لیست ظاهر می‌شود", "Starred — appears first in transaction pickers"), fontSize = 10.sp, color = Color.Gray)
+                            }
                             Row(
                                 modifier = Modifier.fillMaxWidth(),
                                 horizontalArrangement = Arrangement.spacedBy(6.dp)
@@ -1928,7 +2263,10 @@ fun PersonsAccountsDialog(
                                             firstName = newFirstName.trim(),
                                             lastName = newLastName.trim(),
                                             title = newTitle.trim(),
-                                            nature = newNature
+                                            nature = newNature,
+                                            openingBalance = com.example.ui.components.parseGroupedAmount(newOpeningStr),
+                                            priority = newPriorityStr.toIntOrNull() ?: 0,
+                                            isStarred = newStarred
                                         )
                                         if (profile.fullName.isNotBlank()) {
                                             viewModel.savePersonProfile(profile)
@@ -1986,12 +2324,12 @@ fun PersonsAccountsDialog(
                         }
                         items(personNames, key = { it }) { person ->
                             val recs = personRecords[person].orEmpty()
-                            val total = recs.sumOf { it.amount }
                             // پروندهٔ شخص (عنوان و ماهیت) — اگر شخص فقط از سوابق قدیمی
                             // آمده باشد، پرونده‌ای ندارد و مقادیر خالی می‌مانند.
                             val profile = personProfiles.firstOrNull {
                                 it.fullName.equals(person, ignoreCase = true)
                             }
+                            val total = recs.sumOf { it.amount } + (profile?.openingBalance ?: 0L)
                             val natureColor = when (profile?.nature) {
                                 PersonNature.CREDITOR -> Color(0xFF2E7D32)
                                 PersonNature.DEBTOR -> MaterialTheme.colorScheme.error
@@ -2007,36 +2345,16 @@ fun PersonsAccountsDialog(
                                     horizontalArrangement = Arrangement.SpaceBetween,
                                     verticalAlignment = Alignment.CenterVertically
                                 ) {
-                                    Column(modifier = Modifier.weight(1f)) {
-                                        Text("👤 $person", fontWeight = FontWeight.Bold, fontSize = 12.sp)
-                                        val personTitle = profile?.title.orEmpty()
-                                        if (personTitle.isNotBlank()) {
-                                            Text(personTitle, fontSize = 9.5.sp, color = MaterialTheme.colorScheme.primary)
+                                    // طبق درخواست: در حالت بسته فقط عنوان (نام) شخص نشان داده می‌شود
+                                    Row(
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.spacedBy(6.dp),
+                                        modifier = Modifier.weight(1f)
+                                    ) {
+                                        if (profile?.isStarred == true) {
+                                            Icon(Icons.Default.Star, contentDescription = null, tint = Color(0xFFF9A825), modifier = Modifier.size(14.dp))
                                         }
-                                        Row(
-                                            verticalAlignment = Alignment.CenterVertically,
-                                            horizontalArrangement = Arrangement.spacedBy(5.dp)
-                                        ) {
-                                            if (profile != null && profile.nature != PersonNature.NONE) {
-                                                Surface(
-                                                    color = natureColor.copy(alpha = 0.15f),
-                                                    shape = RoundedCornerShape(4.dp)
-                                                ) {
-                                                    Text(
-                                                        text = profile.nature.label(isPersian),
-                                                        fontSize = 8.5.sp,
-                                                        fontWeight = FontWeight.Bold,
-                                                        color = natureColor,
-                                                        modifier = Modifier.padding(horizontal = 5.dp, vertical = 1.dp)
-                                                    )
-                                                }
-                                            }
-                                            Text(
-                                                text = t("${recs.size} تراکنش مستند", "${recs.size} documented transactions"),
-                                                fontSize = 9.5.sp,
-                                                color = Color.Gray
-                                            )
-                                        }
+                                        Text(person, fontWeight = FontWeight.Bold, fontSize = 12.sp, maxLines = 1)
                                     }
                                     Column(horizontalAlignment = Alignment.End) {
                                         Text(
@@ -2053,6 +2371,9 @@ fun PersonsAccountsDialog(
                                                     newLastName = p.lastName
                                                     newTitle = p.title
                                                     newNature = if (p.nature == PersonNature.NONE) PersonNature.DEBTOR else p.nature
+                                                    newOpeningStr = if (p.openingBalance > 0L) formatAmount(p.openingBalance) else ""
+                                                    newPriorityStr = if (p.priority > 0) p.priority.toString() else ""
+                                                    newStarred = p.isStarred
                                                     editingPersonId = p.id
                                                 },
                                                 modifier = Modifier.size(26.dp)

@@ -273,10 +273,10 @@ class DentalRepository(val database: AppDatabase) {
     suspend fun deleteMaintenance(maintenance: EquipmentMaintenance) = 
         database.equipmentMaintenanceDao().deleteMaintenance(maintenance).also { enqueueSyncOp("equipment_maintenance", maintenance.syncId, "DELETE") }
 
-    // Clinic Expenses — در مدل ظرف‌حساب، هر رکورد یک «فاکتور» (بدهی ما) است.
+    // Clinic Expenses — در مدل طرف‌حساب، هر رکورد یک «فاکتور» (بدهی ما) است.
     val allExpenses: Flow<List<ClinicExpense>> = database.clinicExpenseDao().getAllExpenses()
 
-    /** تولید شمارهٔ فاکتورِ پشت‌سرهمِ per-party (مثل LAB-A-0001) و به‌روزکردن شمارندهٔ ظرف. */
+    /** تولید شمارهٔ فاکتورِ پشت‌سرهمِ per-party (مثل LAB-A-0001) و به‌روزکردن شمارندهٔ طرف‌حساب. */
     private suspend fun assignInvoiceNumber(expense: ClinicExpense): ClinicExpense {
         val partyId = expense.partyAccountId ?: return expense
         val party = database.partyAccountDao().getById(partyId) ?: return expense
@@ -337,7 +337,7 @@ class DentalRepository(val database: AppDatabase) {
             newDelta = expensePaymentBankDelta(payment),
         )
         // اگر پرداختِ یک فاکتورِ مشخص بدون partyAccountId ثبت شده (مثلاً از مسیرهای
-        // قدیمی «پرداخت فروشنده» یا «انتقال چک به هزینه»)، خودکار به ظرفِ همان فاکتور
+        // قدیمی «پرداخت فروشنده» یا «انتقال چک به هزینه»)، خودکار به طرف‌حسابِ همان فاکتور
         // وصل می‌شود تا در دفترِ طرف‌حساب دیده شود و ابری هم درست سینک شود.
         val effective = if (payment.partyAccountId == null && payment.clinicExpenseId > 0L) {
             val expPartyId = database.clinicExpenseDao().getExpenseById(payment.clinicExpenseId)?.partyAccountId
@@ -397,7 +397,7 @@ class DentalRepository(val database: AppDatabase) {
     }
 
     // ======================================================================
-    //  ظرف‌های حساب (Party Accounts) — طرف‌حساب‌های چندظرفی هزینه‌های مطب
+    //  طرف‌حساب‌ها (Party Accounts) — طرف‌حساب‌های چندطرف‌حسابی هزینه‌های مطب
     // ======================================================================
     val allPartyAccounts: Flow<List<PartyAccount>> = database.partyAccountDao().getAllPartyAccounts()
 
@@ -407,14 +407,14 @@ class DentalRepository(val database: AppDatabase) {
     suspend fun insertPartyAccount(account: PartyAccount): Long =
         database.partyAccountDao().insertPartyAccount(account).also { enqueueSyncOp("party_accounts", account.syncId, "UPSERT") }
 
-    /** حذف نرمِ ظرف — سوابق (فاکتورها/پرداخت‌ها) برای حفظ دفتر، باقی می‌مانند. */
+    /** حذف نرمِ طرف‌حساب — سوابق (فاکتورها/پرداخت‌ها) برای حفظ دفتر، باقی می‌مانند. */
     suspend fun deletePartyAccount(account: PartyAccount) =
         database.partyAccountDao().insertPartyAccount(
             account.copy(isDeleted = true, updatedAt = System.currentTimeMillis())
         ).also { enqueueSyncOp("party_accounts", account.syncId, "UPSERT") }
 
     /**
-     * یافتن یا ساختِ ظرفِ (section, name). کدِ خودکارِ ظرف از ترتیبِ ساخت در همان بخش
+     * یافتن یا ساختِ طرف‌حسابِ (section, name). کدِ خودکارِ طرف‌حساب از ترتیبِ ساخت در همان بخش
      * ساخته می‌شود: اولی A، دومی B و… (مثل LAB-A، ENG-B، STORE-A).
      */
     suspend fun findOrCreateParty(
@@ -447,13 +447,61 @@ class DentalRepository(val database: AppDatabase) {
     }
 
     /**
-     * Backfill یک‌باره و idempotent: داده‌های قدیمیِ هزینه‌ها را به ظرف‌های حساب وصل می‌کند.
-     *  - از هر «(بخش، نامِ طرف‌حساب)»ِ موجود یک ظرف می‌سازد (لابراتوارها، فروشندگان،
+     * Backfill یک‌باره و idempotent: داده‌های قدیمیِ هزینه‌ها را به طرف‌حساب‌ها وصل می‌کند.
+     *  - از هر «(بخش، نامِ طرف‌حساب)»ِ موجود یک طرف‌حساب می‌سازد (لابراتوارها، فروشندگان،
      *    تکنسین‌ها، تعمیرات و…).
-     *  - فاکتورهای قدیمی و پرداخت‌هایشان را به همان ظرف پیوند می‌دهد.
-     *  - پرداخت‌های «کلیِ ظرف» با clinicExpenseId=0 به partyAccountId وصل می‌شوند.
+     *  - فاکتورهای قدیمی و پرداخت‌هایشان را به همان طرف‌حساب پیوند می‌دهد.
+     *  - پرداخت‌های «کلیِ طرف‌حساب» با clinicExpenseId=0 به partyAccountId وصل می‌شوند.
      * امن است که چند بار صدا زده شود؛ رکوردهایی که قبلاً پیوند خورده‌اند دست نمی‌خورند.
      */
+    /**
+     * اصلاح یک‌باره و idempotent ساختار سرفصل‌های شخصی (درخواست کاربر):
+     *  «جریمه دیرکرد بانک» از سطحِ بدون‌شاخه به حسابِ «هزینه‌های اداری» منتقل
+     *  می‌شود تا درخت سرفصل‌ها تمیز و استاندارد بماند. رکوردهای «اشخاص» دست
+     *  نمی‌خورند.
+     */
+    suspend fun migratePersonalHeadingFixes() = inTransaction {
+        val target = "هزینه‌های اداری"
+        database.personalSubAccountDao().getAllList()
+            .filter {
+                !it.isDeleted && it.category != com.example.data.PERSONS_CATEGORY &&
+                    it.parentName.trim() != target &&
+                    (it.name.contains("جریمه دیرکرد") || it.name.contains("جریمه ديرکرد") || it.name.contains("جریمه تاخیر") || it.name.contains("جریمه تأخیر"))
+            }
+            .forEach { sub ->
+                database.personalSubAccountDao().insertSubAccount(
+                    sub.copy(parentName = target, updatedAt = System.currentTimeMillis())
+                )
+            }
+    }
+
+    /**
+     * طرف‌حساب‌های پیش‌فرضِ بخشِ «هزینه‌های جاری مطب» — درخواست کاربر: این عناوین
+     * به‌صورت پیش‌فرض با فرم و آیکون اختصاصی خودشان در صفحه حضور داشته باشند:
+     * اجاره مطب، شارژ ساختمان مطب، قبض برق/گاز/آب/تلفن/موبایل/اینترنت مطب.
+     * فقط وقتی می‌سازد که بخشِ RUNNING هنوز هیچ طرف‌حساب فعالی ندارد (idempotent).
+     */
+    suspend fun ensureDefaultRunningParties() = inTransaction {
+        val existing = database.partyAccountDao().getBySection(PartySection.RUNNING.key).filter { !it.isDeleted }
+        if (existing.isNotEmpty()) return@inTransaction
+        val defaults = listOf(
+            "اجاره مطب", "شارژ ساختمان مطب", "قبض برق مطب", "قبض گاز مطب",
+            "قبض آب مطب", "قبض تلفن مطب", "قبض موبایل مطب", "قبض اینترنت مطب"
+        )
+        defaults.forEachIndexed { idx, utility ->
+            val letter = ('A'.code + idx).toChar().toString()
+            insertPartyAccount(
+                PartyAccount(
+                    section = PartySection.RUNNING.key,
+                    code = "RUN$letter",
+                    title = PartySection.RUNNING.faTitle,
+                    name = utility,
+                    notes = "UTILITY"
+                )
+            )
+        }
+    }
+
     suspend fun migrateLegacyExpenseParties() = inTransaction {
         val parties = database.partyAccountDao().getAllList()
         fun partyOf(section: PartySection, title: String, name: String): PartyAccount {
@@ -463,7 +511,7 @@ class DentalRepository(val database: AppDatabase) {
             return findOrCreateParty(section, title, n)
         }
 
-        // ۱) فاکتورهای قدیمی (clinic_expenses) — تعیین بخش با inferFrom و پیوند به ظرف.
+        // ۱) فاکتورهای قدیمی (clinic_expenses) — تعیین بخش با inferFrom و پیوند به طرف‌حساب.
         val allExpenses = database.clinicExpenseDao().getAllList()
         allExpenses.forEach { exp ->
             if (exp.isDeleted) return@forEach
@@ -483,7 +531,7 @@ class DentalRepository(val database: AppDatabase) {
             enqueueSyncOp("clinic_expenses", numbered.syncId, "UPSERT")
         }
 
-        // ۲) ظرف‌های واقعیِ بدونِ فاکتور (لابراتوارها / فروشندگان / تکنسین‌ها).
+        // ۲) طرف‌حساب‌های واقعیِ بدونِ فاکتور (لابراتوارها / فروشندگان / تکنسین‌ها).
         database.labOrderDao().getAllList().filter { !it.isDeleted && it.labName.isNotBlank() }
             .forEach { findOrCreateParty(PartySection.LAB, PartySection.LAB.faTitle, it.labName) }
         database.vendorDao().getAllList().filter { !it.isDeleted && it.name.isNotBlank() }
@@ -494,7 +542,7 @@ class DentalRepository(val database: AppDatabase) {
                 findOrCreateParty(PartySection.ENGINEERING, PartySection.ENGINEERING.faTitle, tech ?: "تکنسین تجهیزات")
             }
 
-        // ۳) پرداخت‌های قدیمی — پیوند به ظرفِ فاکتورِ خودشان (یا مستقل اگر کلی باشند).
+        // ۳) پرداخت‌های قدیمی — پیوند به طرف‌حسابِ فاکتورِ خودشان (یا مستقل اگر کلی باشند).
         val partyById = database.partyAccountDao().getAllList().associateBy { it.id }
         database.expensePaymentDao().getAllList().forEach { pay ->
             if (pay.isDeleted) return@forEach

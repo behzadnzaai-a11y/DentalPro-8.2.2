@@ -1,6 +1,9 @@
 package com.example.ui.screens
 
+@file:OptIn(androidx.compose.material3.ExperimentalMaterial3Api::class)
+
 import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -142,6 +145,21 @@ fun ManageFixedIncomesDialog(
                     }
                 }
 
+                // دادهٔ بخش اشخاص (بیرون از LazyListScope — remember فقط در کانتکست کامپوزیبل مجاز است)
+                val persons = remember(subAccounts) {
+                    subAccounts.filter { !it.isDeleted && it.category == com.example.data.PERSONS_CATEGORY }
+                }
+                val personDocs = remember(childrenExpenses, personalTransactions) {
+                    val map = mutableMapOf<String, Long>()
+                    childrenExpenses.filter { !it.isDeleted && it.childName.isNotBlank() }
+                        .forEach { map[it.childName.trim()] = (map[it.childName.trim()] ?: 0L) + it.amount }
+                    personalTransactions.filter { !it.isDeleted && it.subAccountName.startsWith("حساب اشخاص: ") }
+                        .forEach {
+                            val n = it.subAccountName.removePrefix("حساب اشخاص: ").trim()
+                            if (n.isNotBlank()) map[n] = (map[n] ?: 0L) + it.amount
+                        }
+                    map
+                }
                 LazyColumn(verticalArrangement = Arrangement.spacedBy(6.dp), modifier = Modifier.weight(1f, fill = false)) {
                     if (active.isEmpty()) {
                         item {
@@ -222,6 +240,8 @@ fun ManageSubAccountsDialog(
     onDismiss: () -> Unit
 ) {
     val subAccounts by viewModel.personalSubAccounts.collectAsStateWithLifecycle()
+    val childrenExpenses by viewModel.childrenExpenses.collectAsStateWithLifecycle()
+    val personalTransactions by viewModel.personalTransactions.collectAsStateWithLifecycle()
 
     fun t(fa: String, en: String) = if (isPersian) fa else en
 
@@ -230,6 +250,10 @@ fun ManageSubAccountsDialog(
     var category by remember { mutableStateOf("EXPENSE") }
     var parentName by remember { mutableStateOf("") }
     var grandParentName by remember { mutableStateOf("") }
+    // برای «اشخاص»: مبلغ اولیه + اولویت + ستاره (همان دادهٔ واحدِ بخش اشخاص)
+    var openingStr by remember { mutableStateOf("") }
+    var priorityStr by remember { mutableStateOf("") }
+    var starred by remember { mutableStateOf(false) }
     var subToEdit by remember { mutableStateOf<PersonalSubAccount?>(null) }
     var subToDelete by remember { mutableStateOf<PersonalSubAccount?>(null) }
     // حافظهٔ وضعیتِ باز/بستهٔ هر گره در درخت (کلید = نام سرشاخه/شاخه). با
@@ -257,7 +281,7 @@ fun ManageSubAccountsDialog(
     AlertDialog(
         onDismissRequest = onDismiss,
         title = {
-            Text(t("مدیریت سرفصل‌های شخصی", "Manage Personal Sub-Accounts"), fontWeight = FontWeight.Bold, fontSize = 14.sp)
+            Text(t("مدیریت سرفصل‌های شخصی (سرفصل حساب ▸ حساب ▸ زیرحساب)", "Manage personal chart of accounts"), fontWeight = FontWeight.Bold, fontSize = 13.sp)
         },
         text = {
             Column(
@@ -270,13 +294,14 @@ fun ManageSubAccountsDialog(
                         name = ""
                         parentName = ""
                         grandParentName = ""
+                        openingStr = ""; priorityStr = ""; starred = false
                         showForm = !showForm
                     },
                     modifier = Modifier.fillMaxWidth()
                 ) {
                     Icon(if (showForm) Icons.Default.Close else Icons.Default.Add, contentDescription = null, modifier = Modifier.size(15.dp))
                     Spacer(Modifier.width(4.dp))
-                    Text(if (showForm) t("بستن فرم", "Close Form") else t("افزودن سرفصل", "Add Sub-Account"), fontWeight = FontWeight.Bold)
+                    Text(if (showForm) t("بستن فرم", "Close Form") else t("افزودن زیرحساب", "Add sub-account"), fontWeight = FontWeight.Bold)
                 }
 
                 if (showForm) {
@@ -290,29 +315,29 @@ fun ManageSubAccountsDialog(
                             verticalArrangement = Arrangement.spacedBy(7.dp)
                         ) {
                             Text(
-                                text = if (subToEdit != null) t("ویرایش سرفصل و لینک به بالا", "Edit Sub-Account & Link to Parent") else t("افزودن سرفصل جدید", "New Sub-Account"),
+                                text = if (subToEdit != null) t("ویرایش زیرحساب و لینک به بالا", "Edit sub-account & link to parent") else t("افزودن زیرحساب جدید", "New sub-account"),
                                 fontWeight = FontWeight.Bold,
                                 fontSize = 12.sp,
                                 color = MaterialTheme.colorScheme.primary
                             )
                             Text(
-                                t("ساختار سه‌سطحی: سرشاخه ▸ شاخه ▸ حساب. فقط «حساب»‌ها در تراکنش‌ها شرکت می‌کنند.",
-                                    "Three levels: Root ▸ Branch ▸ Account. Only accounts appear in transactions."),
+                                t("ساختار استاندارد حسابداری سه‌سطحی: سرفصل حساب ▸ حساب ▸ زیرحساب. فقط «زیرحساب»‌ها در تراکنش‌ها شرکت می‌کنند.",
+                                    "Standard 3-level chart of accounts: Heading ▸ Account ▸ Sub-account. Only sub-accounts appear in transactions."),
                                 fontSize = 9.5.sp, color = MaterialTheme.colorScheme.primary
                             )
                             OutlinedTextField(
                                 value = name, onValueChange = { name = it },
-                                label = { Text(t("نام حساب (سطح آخر، مثلاً هزینه خانه)", "Account name (leaf, e.g. Home)")) },
+                                label = { Text(t("نام زیرحساب (سطح آخر، مثلاً هزینه خانه)", "Sub-account name (leaf, e.g. Home)")) },
                                 modifier = Modifier.fillMaxWidth(), singleLine = true
                             )
                             OutlinedTextField(
                                 value = parentName, onValueChange = { parentName = it },
-                                label = { Text(t("شاخه (سرفصل والد، اختیاری)", "Branch (parent, optional)")) },
+                                label = { Text(t("حساب (والد، اختیاری)", "Account (parent, optional)")) },
                                 placeholder = { Text(t("مثلاً: هزینه‌های عمومی", "e.g. General Expenses")) },
                                 modifier = Modifier.fillMaxWidth(), singleLine = true
                             )
                             if (availableParents.isNotEmpty()) {
-                                Text(t("انتخاب از شاخه‌های موجود:", "Pick existing branch:"), fontSize = 10.sp, color = Color.Gray)
+                                Text(t("انتخاب از حساب‌های موجود:", "Pick existing account:"), fontSize = 10.sp, color = Color.Gray)
                                 Row(
                                     modifier = Modifier.fillMaxWidth().horizontalScrollCompat2(),
                                     horizontalArrangement = Arrangement.spacedBy(4.dp)
@@ -327,12 +352,12 @@ fun ManageSubAccountsDialog(
                             }
                             OutlinedTextField(
                                 value = grandParentName, onValueChange = { grandParentName = it },
-                                label = { Text(t("سرشاخه (سطح ریشه، اختیاری)", "Root (grandparent, optional)")) },
+                                label = { Text(t("سرفصل حساب (سطح ریشه، اختیاری)", "Account heading (root, optional)")) },
                                 placeholder = { Text(t("مثلاً: هزینه‌ها", "e.g. Expenses")) },
                                 modifier = Modifier.fillMaxWidth(), singleLine = true
                             )
                             if (availableGrandParents.isNotEmpty()) {
-                                Text(t("انتخاب از سرشاخه‌های موجود:", "Pick existing root:"), fontSize = 10.sp, color = Color.Gray)
+                                Text(t("انتخاب از سرفصل‌های موجود:", "Pick existing heading:"), fontSize = 10.sp, color = Color.Gray)
                                 Row(
                                     modifier = Modifier.fillMaxWidth().horizontalScrollCompat2(),
                                     horizontalArrangement = Arrangement.spacedBy(4.dp)
@@ -363,17 +388,67 @@ fun ManageSubAccountsDialog(
                                     )
                                 }
                             }
+                            // برای «اشخاص»: مبلغ اولیه + اولویت + ستاره (مدیریت واحد با بخش حساب اشخاص)
+                            if (category == "PERSONS") {
+                                com.example.ui.components.AmountInputField(
+                                    value = openingStr,
+                                    onValueChange = { openingStr = it },
+                                    label = t("مبلغ اولیه (افتتاحیه)", "Opening balance"),
+                                    currency = viewModel.label("currency"),
+                                    isPersian = isPersian
+                                )
+                                OutlinedTextField(
+                                    value = priorityStr,
+                                    onValueChange = { priorityStr = it.filter(Char::isDigit).take(3) },
+                                    label = { Text(t("شمارهٔ اولویت (کوچک‌تر = اول لیست‌ها)", "Priority (lower = first)"), fontSize = 10.sp) },
+                                    modifier = Modifier.fillMaxWidth(), singleLine = true
+                                )
+                                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                                    IconButton(onClick = { starred = !starred }) {
+                                        Icon(
+                                            if (starred) Icons.Default.Star else Icons.Default.StarBorder,
+                                            contentDescription = t("ستاره‌دار", "Starred"),
+                                            tint = if (starred) Color(0xFFF9A825) else Color.Gray,
+                                            modifier = Modifier.size(18.dp)
+                                        )
+                                    }
+                                    Text(t("ستاره‌دار — در تراکنش‌ها اول لیست ظاهر می‌شود", "Starred — appears first in transaction pickers"), fontSize = 10.sp, color = Color.Gray)
+                                }
+                            }
                             Button(
                                 onClick = {
                                     if (name.isNotBlank()) {
+                                        val opening = com.example.ui.components.parseGroupedAmount(openingStr)
+                                        val priority = priorityStr.toIntOrNull() ?: 0
                                         if (subToEdit == null) {
-                                            viewModel.addPersonalSubAccount(name.trim(), category, parentName.trim(), grandParentName = grandParentName.trim())
+                                            if (category == "PERSONS") {
+                                                // اشخاص: همان رکورد واحد PERSONS (دیده‌شده در «حساب اشخاص»)
+                                                viewModel.updatePersonalSubAccount(
+                                                    PersonalSubAccount(
+                                                        name = name.trim(), category = "PERSONS",
+                                                        parentName = parentName.trim(), grandParentName = grandParentName.trim(),
+                                                        ledgerSide = "NONE", openingBalance = opening, priority = priority,
+                                                        isQuickSelect = starred
+                                                    )
+                                                )
+                                            } else {
+                                                viewModel.addPersonalSubAccount(name.trim(), category, parentName.trim(), grandParentName = grandParentName.trim())
+                                            }
                                         } else {
-                                            viewModel.updatePersonalSubAccount(subToEdit!!.copy(name = name.trim(), category = category, parentName = parentName.trim(), grandParentName = grandParentName.trim()))
+                                            viewModel.updatePersonalSubAccount(
+                                                subToEdit!!.copy(
+                                                    name = name.trim(), category = category,
+                                                    parentName = parentName.trim(), grandParentName = grandParentName.trim(),
+                                                    openingBalance = if (category == "PERSONS") opening else subToEdit!!.openingBalance,
+                                                    priority = if (category == "PERSONS") priority else subToEdit!!.priority,
+                                                    isQuickSelect = if (category == "PERSONS") starred else subToEdit!!.isQuickSelect
+                                                )
+                                            )
                                         }
                                         name = ""
                                         parentName = ""
                                         grandParentName = ""
+                                        openingStr = ""; priorityStr = ""; starred = false
                                         subToEdit = null
                                         showForm = false
                                     }
@@ -382,7 +457,7 @@ fun ManageSubAccountsDialog(
                                 enabled = name.isNotBlank()
                             ) {
                                 Text(
-                                    if (subToEdit != null) t("ذخیره تغییرات و لینک", "Save Changes & Link") else t("ثبت سرفصل", "Save"),
+                                    if (subToEdit != null) t("ذخیره تغییرات و لینک", "Save Changes & Link") else t("ثبت زیرحساب", "Save"),
                                     fontWeight = FontWeight.Bold
                                 )
                             }
@@ -392,8 +467,8 @@ fun ManageSubAccountsDialog(
 
                 Text(
                     text = t(
-                        "درخت به‌صورت کرکره‌ای است: سرشاخه‌ها و شاخه‌ها جمع/باز می‌شوند (وضعیت به‌خاطر سپرده می‌شود) و فقط «حساب»‌ها در تراکنش‌ها شرکت می‌کنند. ⭐/ویرایش/حذف فقط برای حساب‌ها.",
-                        "Collapsible tree: roots & branches fold/unfold (state is remembered); only accounts participate in transactions. ⭐/edit/delete apply to accounts only."
+                        "درختِ کرکره‌ای با اصطلاحات استاندارد حسابداری: «سرفصل حساب ▸ حساب ▸ زیرحساب»؛ فقط زیرحساب‌ها در تراکنش‌ها شرکت می‌کنند. هر حساب در انتها سطرِ «سایر / متفرقه» و «افزودن» دارد و حساب‌های اشخاص (بستانکار/بدهکار) در انتهای لیست، هم‌بسته با بخش «حساب اشخاص» مدیریت می‌شوند.",
+                        "Collapsible tree with standard accounting terms: Heading ▸ Account ▸ Sub-account; only sub-accounts join transactions. Each account ends with an \"Other/Misc\" row and an add row; person accounts (creditor/debtor) are managed at the end, unified with the Persons section."
                     ),
                     fontSize = 9.5.sp,
                     color = Color.Gray
@@ -406,17 +481,82 @@ fun ManageSubAccountsDialog(
                     "PERSONS" -> t("اشخاص", "Persons"); else -> c
                 }
 
-                // ساخت درختِ سه‌سطحی: سرشاخه (grandParent) ▸ شاخه (parent) ▸ حساب (برگ).
-                // گره‌های بدونِ سرشاخه/شاخه زیرِ کلیدِ خالی «(بدون گروه)» می‌آیند.
-                val rootKeyless = t("(بدون سرشاخه)", "(No root)")
-                val branchKeyless = t("(بدون شاخه)", "(No branch)")
-                val tree = remember(active) {
-                    active.groupBy { it.grandParentName.trim() }
-                        .toSortedMap(compareBy { it.ifBlank { "\uFFFF" } })
+                // ساختار استاندارد حسابداری: سرفصل حساب (root) ▸ حساب (branch) ▸ زیرحساب (leaf).
+                // به‌درخواست کاربر: سطرِ «(بدون سرشاخه)» حذف شد — حساب‌های بدونِ سرفصل
+                // خودشان در سطح اول (به‌عنوان حسابِ مستقل) باز می‌شوند و زیرحساب‌های بدونِ
+                // حساب هم مستقیم به‌صورت برگِ سطح اول دیده می‌شوند؛ هیچ سطرِ شبه‌گروهی
+                // نمایش داده نمی‌شود. اشخاص هم از درخت جدا و در بخش اختصاصیِ انتهای
+                // لیست می‌آیند.
+                val nonPersons = remember(active) { active.filter { it.category != com.example.data.PERSONS_CATEGORY } }
+                val tree = remember(nonPersons) {
+                    nonPersons.groupBy { it.grandParentName.trim() }
+                        .toSortedMap(compareBy { it })
                         .mapValues { (_, branchList) ->
                             branchList.groupBy { it.parentName.trim() }
-                                .toSortedMap(compareBy { it.ifBlank { "\uFFFF" } })
+                                .toSortedMap(compareBy { it })
                         }
+                }
+                val rootedTree = remember(tree) { tree.filterKeys { it.isNotBlank() } }
+                val rootlessBranches = remember(tree) { tree[""].orEmpty().filterKeys { it.isNotBlank() } }
+                val rootlessLeaves = remember(tree) { tree[""].orEmpty()[""].orEmpty() }
+
+                val miscName = t("سایر / متفرقه", "Other / Misc")
+                fun dominantCategory(leaves: List<PersonalSubAccount>): String =
+                    leaves.groupBy { it.category }.maxByOrNull { (_, v) -> v.size }?.key ?: "EXPENSE"
+
+                /** سطر پایانیِ «سایر / متفرقه» — با لمس، زیرحسابِ واقعیِ هم‌نام در همان حساب ساخته می‌شود. */
+                @Composable
+                fun MiscRow(branch: String, grand: String, leaves: List<PersonalSubAccount>, indent: Int) {
+                    if (leaves.any { it.name.trim() == miscName }) return
+                    Surface(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(start = (indent * 14).dp)
+                            .clickable {
+                                viewModel.addPersonalSubAccount(miscName, dominantCategory(leaves), branch, grandParentName = grand)
+                            },
+                        shape = RoundedCornerShape(10.dp),
+                        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f)
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(6.dp)
+                        ) {
+                            Icon(Icons.Default.MoreHoriz, contentDescription = null, tint = Color.Gray, modifier = Modifier.size(14.dp))
+                            Text(t("سایر / متفرقه", "Other / Misc"), fontSize = 11.sp, color = Color.Gray, fontStyle = androidx.compose.ui.text.font.FontStyle.Italic)
+                        }
+                    }
+                }
+
+                /** سطر پایانیِ «＋ اضافه کردن» — فرمِ افزودن را برای همان حساب پیش‌پر می‌کند. */
+                @Composable
+                fun AddToBranchRow(branch: String, grand: String, leaves: List<PersonalSubAccount>, indent: Int) {
+                    Surface(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(start = (indent * 14).dp)
+                            .clickable {
+                                subToEdit = null
+                                parentName = branch
+                                grandParentName = grand
+                                category = dominantCategory(leaves)
+                                name = ""
+                                openingStr = ""; priorityStr = ""; starred = false
+                                showForm = true
+                            },
+                        shape = RoundedCornerShape(10.dp),
+                        color = MaterialTheme.colorScheme.primary.copy(alpha = 0.08f)
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(6.dp)
+                        ) {
+                            Icon(Icons.Default.Add, contentDescription = null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(14.dp))
+                            Text(t("افزودن زیرحساب به همین حساب", "Add sub-account to this account"), fontSize = 11.sp, color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.Bold)
+                        }
+                    }
                 }
 
                 @Composable
@@ -453,6 +593,9 @@ fun ManageSubAccountsDialog(
                                         category = sub.category
                                         parentName = sub.parentName
                                         grandParentName = sub.grandParentName
+                                        openingStr = if (sub.openingBalance > 0L) formatAmount(sub.openingBalance) else ""
+                                        priorityStr = if (sub.priority > 0) sub.priority.toString() else ""
+                                        starred = sub.isQuickSelect
                                         showForm = true
                                     },
                                     modifier = Modifier.size(30.dp)
@@ -494,30 +637,127 @@ fun ManageSubAccountsDialog(
                     if (active.isEmpty()) {
                         item {
                             Text(
-                                text = t("هنوز سرفصلی تعریف نشده است.", "No sub-accounts yet."),
+                                text = t("هنوز زیرحسابی تعریف نشده است.", "No sub-accounts yet."),
                                 fontSize = 11.sp, color = Color.Gray,
                                 modifier = Modifier.padding(vertical = 8.dp)
                             )
                         }
                     }
-                    tree.forEach { (grand, branches) ->
-                        val grandLabel = grand.ifBlank { rootKeyless }
-                        val grandKey = "G:$grandLabel"
+                    // ۱) سرفصل‌های واقعی (دارای عنوان) ▸ حساب‌ها ▸ زیرحساب‌ها
+                    rootedTree.forEach { (grand, branches) ->
+                        val grandKey = "G:$grand"
                         val grandCount = branches.values.sumOf { it.size }
                         val grandExpanded = grandKey in expandedNodes
                         item(key = grandKey) {
-                            NodeHeader(grandLabel, grandCount, grandExpanded, 0) { toggleNode(grandKey) }
+                            NodeHeader(grand, grandCount, grandExpanded, 0) { toggleNode(grandKey) }
                         }
                         if (grandExpanded) {
                             branches.forEach { (branch, leaves) ->
-                                val branchLabel = branch.ifBlank { branchKeyless }
-                                val branchKey = "$grandKey|B:$branchLabel"
-                                val branchExpanded = branchKey in expandedNodes
-                                item(key = branchKey) {
-                                    NodeHeader(branchLabel, leaves.size, branchExpanded, 1) { toggleNode(branchKey) }
+                                if (branch.isBlank()) {
+                                    // زیرحساب‌هایی که مستقیم زیرِ سرفصلند (بدون حساب میانی)
+                                    items(leaves.sortedBy { it.name }, key = { "L:${it.id}" }) { sub -> LeafRow(sub, 1) }
+                                    item(key = "$grandKey|misc") { MiscRow("", grand, leaves, 1) }
+                                    item(key = "$grandKey|add") { AddToBranchRow("", grand, leaves, 1) }
+                                } else {
+                                    val branchKey = "$grandKey|B:$branch"
+                                    val branchExpanded = branchKey in expandedNodes
+                                    item(key = branchKey) {
+                                        NodeHeader(branch, leaves.size, branchExpanded, 1) { toggleNode(branchKey) }
+                                    }
+                                    if (branchExpanded) {
+                                        items(leaves.sortedBy { it.name }, key = { "L:${it.id}" }) { sub -> LeafRow(sub, 2) }
+                                        item(key = "$branchKey|misc") { MiscRow(branch, grand, leaves, 2) }
+                                        item(key = "$branchKey|add") { AddToBranchRow(branch, grand, leaves, 2) }
+                                    }
                                 }
-                                if (branchExpanded) {
-                                    items(leaves, key = { "L:${it.id}" }) { sub -> LeafRow(sub, 2) }
+                            }
+                        }
+                    }
+                    // ۲) حساب‌های بدون سرفصل — به‌جای سطر «(بدون سرشاخه)» خودشان سطح اول‌اند
+                    rootlessBranches.forEach { (branch, leaves) ->
+                        val branchKey = "G:$branch"
+                        val branchExpanded = branchKey in expandedNodes
+                        item(key = branchKey) {
+                            NodeHeader(branch, leaves.size, branchExpanded, 0) { toggleNode(branchKey) }
+                        }
+                        if (branchExpanded) {
+                            items(leaves.sortedBy { it.name }, key = { "L:${it.id}" }) { sub -> LeafRow(sub, 1) }
+                            item(key = "$branchKey|misc") { MiscRow(branch, "", leaves, 1) }
+                            item(key = "$branchKey|add") { AddToBranchRow(branch, "", leaves, 1) }
+                        }
+                    }
+                    // ۳) زیرحساب‌های بدون حساب و بدون سرفصل — برگِ سطح اول (بدون سطر شبه‌گروه)
+                    items(rootlessLeaves.sortedBy { it.name }, key = { "L:${it.id}" }) { sub -> LeafRow(sub, 0) }
+
+                    // ——— حساب‌های اشخاص به تفکیک بستانکار / بدهکار (مدیریت واحد با «حساب اشخاص») ———
+                    if (persons.isNotEmpty()) {
+                        item(key = "personsHeader") {
+                            Text(
+                                t("حساب‌های اشخاص (بستانکار / بدهکار) — همان دادهٔ واحد بخش «حساب اشخاص»", "Person accounts (creditor / debtor) — same unified data as the Persons section"),
+                                fontSize = 11.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary,
+                                modifier = Modifier.padding(top = 8.dp)
+                            )
+                        }
+                        listOf(
+                            "CREDITOR" to t("بستانکاران", "Creditors"),
+                            "DEBTOR" to t("بدهکاران", "Debtors"),
+                            "NONE" to t("بدون ماهیت", "Unspecified")
+                        ).forEach { (side, sideLabel) ->
+                            val group = persons.filter { it.ledgerSide == side }
+                            if (group.isNotEmpty()) {
+                                item(key = "personsSide$side") {
+                                    Text(sideLabel, fontSize = 10.sp, color = Color.Gray, fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(top = 4.dp))
+                                }
+                                items(group.sortedWith(compareByDescending<PersonalSubAccount> { it.isQuickSelect }.thenBy { it.priority }.thenBy { it.name }), key = { "P:${it.id}" }) { person ->
+                                    val total = (personDocs[person.name.trim()] ?: 0L) + person.openingBalance
+                                    Card(modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(10.dp)) {
+                                        Row(
+                                            modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
+                                            verticalAlignment = Alignment.CenterVertically,
+                                            horizontalArrangement = Arrangement.SpaceBetween
+                                        ) {
+                                            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp), modifier = Modifier.weight(1f)) {
+                                                Icon(
+                                                    if (person.isQuickSelect) Icons.Default.Star else Icons.Default.StarBorder,
+                                                    contentDescription = t("ستاره", "Star"),
+                                                    tint = if (person.isQuickSelect) Color(0xFFF9A825) else Color.Gray,
+                                                    modifier = Modifier
+                                                        .size(20.dp)
+                                                        .clickable { viewModel.updatePersonalSubAccount(person.copy(isQuickSelect = !person.isQuickSelect, updatedAt = System.currentTimeMillis())) }
+                                                )
+                                                Column {
+                                                    Text(person.name, fontWeight = FontWeight.Bold, fontSize = 12.sp)
+                                                    if (person.parentName.isNotBlank()) Text(person.parentName, fontSize = 9.sp, color = MaterialTheme.colorScheme.primary)
+                                                }
+                                            }
+                                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                                if (person.priority > 0) {
+                                                    Text(t("اولویت ${person.priority}", "P${person.priority}"), fontSize = 9.sp, color = Color.Gray, modifier = Modifier.padding(end = 4.dp))
+                                                }
+                                                Text(
+                                                    "${formatAmount(total)} ${viewModel.label("currency")}",
+                                                    fontSize = 11.sp, fontWeight = FontWeight.Bold,
+                                                    color = if (side == "DEBTOR") MaterialTheme.colorScheme.error else Color(0xFF2E7D32)
+                                                )
+                                                IconButton(onClick = {
+                                                    subToEdit = person
+                                                    name = person.name
+                                                    category = "PERSONS"
+                                                    parentName = person.parentName
+                                                    grandParentName = person.grandParentName
+                                                    openingStr = if (person.openingBalance > 0L) formatAmount(person.openingBalance) else ""
+                                                    priorityStr = if (person.priority > 0) person.priority.toString() else ""
+                                                    starred = person.isQuickSelect
+                                                    showForm = true
+                                                }, modifier = Modifier.size(28.dp)) {
+                                                    Icon(Icons.Default.Edit, contentDescription = t("ویرایش", "Edit"), tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(14.dp))
+                                                }
+                                                IconButton(onClick = { subToDelete = person }, modifier = Modifier.size(28.dp)) {
+                                                    Icon(Icons.Default.Delete, contentDescription = t("حذف", "Delete"), tint = MaterialTheme.colorScheme.error, modifier = Modifier.size(14.dp))
+                                                }
+                                            }
+                                        }
+                                    }
                                 }
                             }
                         }
@@ -533,8 +773,8 @@ fun ManageSubAccountsDialog(
     if (subToDelete != null) {
         AlertDialog(
             onDismissRequest = { subToDelete = null },
-            title = { Text(t("حذف سرفصل", "Delete Sub-Account"), fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.error) },
-            text = { Text(t("سرفصل «${subToDelete!!.name}» حذف شود؟", "Delete ${subToDelete!!.name}?")) },
+            title = { Text(t("حذف زیرحساب", "Delete sub-account"), fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.error) },
+            text = { Text(t("زیرحساب «${subToDelete!!.name}» حذف شود؟", "Delete ${subToDelete!!.name}?")) },
             confirmButton = {
                 Button(
                     onClick = {
